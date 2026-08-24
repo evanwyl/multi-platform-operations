@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `idx_accounts_mcp_port_real` ON `accounts` (`mcp_port`) WHERE "accounts"."is_demo" = 0;

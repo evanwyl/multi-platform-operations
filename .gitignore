@@ -1,0 +1,32 @@
+.DS_Store
+*.tsbuildinfo
+
+# Local credentials and login/session data
+.env
+.env.*
+!.env.example
+**/*cookie*
+**/*session*
+**/*.pem
+**/*.key
+
+# Local databases and runtime state
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*
+platform/runtime/generated/
+platform/runtime/accounts/
+platform/runtime/logs/
+platform/runtime/publish-assets/
+platform/public/generated/
+
+# Dependencies, builds and local tool state
+**/node_modules/
+platform/.next/
+platform/.vinext/
+platform/dist/
+platform/.wrangler/
+platform/coverage/
+platform/outputs/
+platform/work/
