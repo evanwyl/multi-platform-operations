@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["theme", "intent_summary", "publish_time", "sort_by", "content_type", "keywords", "exclude_keywords"],
+  "properties": {
+    "theme": { "type": "string", "minLength": 1 },
+    "intent_summary": { "type": "string", "minLength": 1 },
+    "publish_time": { "type": "string", "enum": ["一天内", "一周内", "半年内"] },
+    "sort_by": { "type": "string", "enum": ["综合", "最新", "最多点赞", "最多评论", "最多收藏"] },
+    "content_type": { "type": "string", "enum": ["image", "video", "all"] },
+    "keywords": { "type": "array", "minItems": 3, "maxItems": 6, "items": { "type": "string", "minLength": 1 } },
+    "exclude_keywords": { "type": "array", "maxItems": 10, "items": { "type": "string" } }
+  }
+}
