@@ -253,6 +253,7 @@ function Trends({ reloadApp, notify }: { reloadApp: () => Promise<void>; notify:
       }
       const words = begin.keywords as string[];
       const scanWarnings: string[] = [];
+      if (begin.recovered_failed_screen) { stage = "已恢复上次保存的候选，正在继续相关度初筛"; setScanning(stage); }
       for (let index = 0; index < words.length; index += 1) {
         stage = `3/5 正在搜索基础样本 ${index + 1}/${words.length}：${words[index]}`; setScanning(stage);
         const scanned = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify({ action: "scan_keyword", scan_id: begin.scan_id, keyword: words[index] }) });

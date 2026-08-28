@@ -289,12 +289,25 @@ export async function POST(request: Request) {
     const keywords = cleanList(data.keywords ?? parseList(settings.keywords), 3, 6);
     if (keywords.length < 3) return Response.json({ error: "主采集账号至少需要3个种子关键词" }, { status: 409 });
     const targetAccountId = String(data.target_account_id ?? settings.target_account_id ?? "");
+    const requestText = String(data.request_text ?? "").slice(0, 300);
     const targetAccount = await db.prepare("SELECT id,name,persona,audience FROM accounts WHERE id=? AND is_demo=0").bind(targetAccountId)
       .first<{ id: string; name: string; persona: string; audience: string }>();
     if (!targetAccount?.persona?.trim() || !targetAccount.audience?.trim()) return Response.json({ error: "目标内容账号定位不完整，请重新生成搜索计划" }, { status: 409 });
     const account = await db.prepare("SELECT id,name,status,xhs_user_id,xhs_nickname FROM accounts WHERE id=? AND is_demo=0").bind(settings.account_id).first<Account>();
     if (!account) return Response.json({ error: "主采集账号记录不存在" }, { status: 409 });
     if (!account.xhs_user_id) return Response.json({ error: `${account.name} 尚未完成首次扫码和唯一身份绑定` }, { status: 409 });
+    const recoverable = await db.prepare(`SELECT id,keywords,completed_keywords FROM trend_scans
+      WHERE target_account_id=? AND request_text=? AND status='failed' AND error='Codex 分析格式未配置'
+      ORDER BY started_at DESC LIMIT 1`).bind(targetAccount.id, requestText).first<{ id: string; keywords: string; completed_keywords: string }>();
+    if (recoverable) {
+      const savedKeywords = parseList(recoverable.keywords);
+      const savedCompleted = parseList(recoverable.completed_keywords);
+      if (savedKeywords.length >= 3 && savedKeywords.length === savedCompleted.length) {
+        await db.prepare("UPDATE trend_scans SET status='running',error='',completed_at=NULL WHERE id=?").bind(recoverable.id).run();
+        await audit(user.id, "恢复已完成搜索的失败任务", "trend_scan", recoverable.id, `${savedKeywords.length} 个关键词已完成，直接继续候选初筛`);
+        return Response.json({ scan_id: recoverable.id, keywords: [], recovered_failed_screen: true, account_name: account.xhs_nickname || account.name, target_account_name: targetAccount.name });
+      }
+    }
     if (settings.next_allowed_at && new Date(settings.next_allowed_at) > now) {
       const latest = await db.prepare("SELECT id,status,started_at FROM trend_scans WHERE target_account_id=? AND keywords=? AND status IN ('completed','analyzed') ORDER BY started_at DESC LIMIT 1")
         .bind(targetAccount.id, JSON.stringify(keywords)).first<{ id: string; status: string; started_at: string }>();
@@ -318,7 +331,6 @@ export async function POST(request: Request) {
     if (staleRunning && now.getTime() - new Date(staleRunning.started_at).getTime() < 15 * 60 * 1000) return Response.json({ error: "已有采集任务正在进行，请稍后查看" }, { status: 409 });
     if (staleRunning) await db.prepare("UPDATE trend_scans SET status='failed',error='任务中断',completed_at=? WHERE id=?").bind(nowIso, staleRunning.id).run();
     const scanId = crypto.randomUUID();
-    const requestText = String(data.request_text ?? "").slice(0, 300);
     const theme = String(data.theme ?? "").slice(0, 100);
     const keywordPlan = {
       primary_keyword: String(data.primary_keyword ?? "").slice(0, 80), intent_phrase: String(data.intent_phrase ?? "").slice(0, 120),

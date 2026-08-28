@@ -155,6 +155,8 @@ test("uses account-aware layered keywords and quality gates before creating topi
   assert.match(route, /information >= 60 && remix >= 60 && accountFit >= 55/);
   assert.match(route, /qualityTier === "core"/);
   assert.match(route, /sources\.length < 2/);
+  assert.match(route, /恢复已完成搜索的失败任务/);
+  assert.match(route, /recovered_failed_screen: true/);
   assert.match(analysisSchema, /"visible_proof_score"/);
   assert.match(analysisSchema, /"reproducibility_score"/);
   assert.match(database, /content_pillars/);
