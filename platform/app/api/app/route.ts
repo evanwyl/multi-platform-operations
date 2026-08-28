@@ -12,6 +12,16 @@ async function requireUser(request: Request) {
   return user;
 }
 
+function cleanTextList(value: unknown, max: number) {
+  const source = Array.isArray(value) ? value : String(value ?? "").split(/[，,\n]/);
+  return [...new Set(source.map((item) => String(item).trim()).filter(Boolean))].slice(0, max);
+}
+
+function parseTextList(value: unknown) {
+  try { const parsed = JSON.parse(String(value || "[]")); return Array.isArray(parsed) ? parsed.map(String) : []; }
+  catch { return []; }
+}
+
 export async function GET(request: Request) {
   await ensureDatabase();
   let user;
@@ -42,7 +52,12 @@ export async function GET(request: Request) {
     db.prepare("SELECT id,name,username,roles,status,created_at FROM users WHERE status='active' ORDER BY created_at").all(),
   ]);
   return Response.json({
-    user: publicUser(user), accounts: accounts.results, topics: topics.results.map((topic) => ({
+    user: publicUser(user), accounts: accounts.results.map((account) => ({
+      ...account,
+      content_pillars: parseTextList(account.content_pillars),
+      strategy_keywords: parseTextList(account.strategy_keywords),
+      excluded_topics: parseTextList(account.excluded_topics),
+    })), topics: topics.results.map((topic) => ({
       ...topic,
       hook_points: topic.hook_points ? JSON.parse(String(topic.hook_points)) : [],
       content_structure: topic.content_structure ? JSON.parse(String(topic.content_structure)) : [],
@@ -82,6 +97,26 @@ export async function POST(request: Request) {
       .bind(id, name, colors[(count?.total ?? 0) % colors.length], now).run();
     await audit(user.id, "添加小红书账号", "account", id, name);
     return Response.json({ ok: true, id }, { status: 201 });
+  }
+
+  if (action === "update_account_strategy") {
+    const roles = JSON.parse(user.roles) as string[];
+    if (!roles.includes("admin")) return Response.json({ error: "只有管理员可以修改账号定位" }, { status: 403 });
+    const accountId = String(data.account_id ?? "");
+    const account = await db.prepare("SELECT id,name FROM accounts WHERE id=? AND is_demo=0").bind(accountId).first<{ id: string; name: string }>();
+    if (!account) return Response.json({ error: "账号不存在" }, { status: 404 });
+    const persona = String(data.persona ?? "").trim().slice(0, 500);
+    const audience = String(data.audience ?? "").trim().slice(0, 500);
+    const pillars = cleanTextList(data.content_pillars, 6);
+    const keywords = cleanTextList(data.strategy_keywords, 15);
+    const excludes = cleanTextList(data.excluded_topics, 20);
+    if (!persona || !audience) return Response.json({ error: "请填写账号定位和目标受众" }, { status: 400 });
+    if (pillars.length < 2) return Response.json({ error: "请至少填写2个内容支柱" }, { status: 400 });
+    if (keywords.length < 3) return Response.json({ error: "请至少填写3个策略关键词" }, { status: 400 });
+    await db.prepare("UPDATE accounts SET persona=?,audience=?,content_pillars=?,strategy_keywords=?,excluded_topics=?,updated_at=? WHERE id=?")
+      .bind(persona, audience, JSON.stringify(pillars), JSON.stringify(keywords), JSON.stringify(excludes), now, account.id).run();
+    await audit(user.id, "更新账号内容定位", "account", account.id, `${account.name} / ${pillars.join("、")} / ${keywords.join("、")}`);
+    return Response.json({ ok: true });
   }
 
   if (action === "create_user") {

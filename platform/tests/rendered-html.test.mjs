@@ -82,7 +82,8 @@ test("preserves requested media type and progressively enriches retained researc
   assert.match(source, /正在搜索基础样本/);
   assert.match(source, /正在补充详情/);
   assert.match(source, /最后一步：采集与正文读取已完成，AI 正在聚类/);
-  assert.match(source, /AI 分析中…/);
+  assert.match(source, /AI 正在生成垂直搜索计划/);
+  assert.match(source, /确认并开始采集/);
   assert.match(source, /action: "enrich_sample"/);
   assert.match(source, /补抓正文/);
   assert.match(source, /切换到其他页面后仍会继续/);
@@ -128,7 +129,7 @@ test("supports bulk sample transfer and keeps the team topic library independent
   assert.match(source, /create_topics_bulk/);
   assert.match(source, /全选当前列表/);
   assert.match(source, /批量转入选题中心/);
-  assert.match(source, /入选待转入/);
+  assert.match(source, /核心样本/);
   assert.match(source, /可转入 \{transferableCount\} 条/);
   assert.match(source, /已转入 \$\{alreadyTransferredCount\} 条/);
   assert.match(route, /action === "create_topics_bulk"/);
@@ -136,6 +137,32 @@ test("supports bulk sample transfer and keeps the team topic library independent
   assert.match(route, /UPDATE trend_samples SET status='used'/);
   assert.match(styles, /\.creation-strip\+\.data-panel>\.topic-cards\{[^}]*overflow-y:auto/);
   assert.match(styles, /\.page-stack:has\(> \.creation-strip\)/);
+});
+
+test("uses account-aware layered keywords and quality gates before creating topics", async () => {
+  const route = await readFile(new URL("../app/api/trends/route.ts", import.meta.url), "utf8");
+  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
+  const database = await readFile(new URL("../lib/database.ts", import.meta.url), "utf8");
+  const planSchema = await readFile(new URL("../runtime/trend-plan.schema.json", import.meta.url), "utf8");
+  const analysisSchema = await readFile(new URL("../runtime/topic-analysis.schema.json", import.meta.url), "utf8");
+  const candidateSchema = await readFile(new URL("../runtime/candidate-screen.schema.json", import.meta.url), "utf8");
+  assert.match(planSchema, /"primary_keyword"/);
+  assert.match(planSchema, /"intent_phrase"/);
+  assert.match(planSchema, /"scenario_terms"/);
+  assert.match(candidateSchema, /"intent_match_score"/);
+  assert.match(candidateSchema, /"account_fit_score"/);
+  assert.match(route, /relevance \* \.55 \+ intent \* \.25 \+ heatScores\[index\] \* \.20/);
+  assert.match(route, /information >= 60 && remix >= 60 && accountFit >= 55/);
+  assert.match(route, /qualityTier === "core"/);
+  assert.match(route, /sources\.length < 2/);
+  assert.match(analysisSchema, /"visible_proof_score"/);
+  assert.match(analysisSchema, /"reproducibility_score"/);
+  assert.match(database, /content_pillars/);
+  assert.match(database, /final_quality_score/);
+  assert.match(source, /目标内容账号/);
+  assert.match(source, /生成搜索计划/);
+  assert.match(source, /趋势信号/);
+  assert.match(source, /update_account_strategy/);
 });
 
 test("supports confirmed bulk deletion without hard-deleting sample or topic records", async () => {

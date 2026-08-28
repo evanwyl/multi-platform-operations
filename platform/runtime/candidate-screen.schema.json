@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["overview", "candidates"],
+  "properties": {
+    "overview": { "type": "string" },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["feed_id", "relevance_score", "intent_match_score", "account_fit_score", "semantic_noise", "reason"],
+        "properties": {
+          "feed_id": { "type": "string" },
+          "relevance_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "intent_match_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "account_fit_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "semantic_noise": { "type": "boolean" },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}
