@@ -139,7 +139,7 @@ test("supports bulk sample transfer and keeps the team topic library independent
   assert.match(styles, /\.page-stack:has\(> \.creation-strip\)/);
 });
 
-test("uses account-aware layered keywords and quality gates before creating topics", async () => {
+test("uses account-aware quality gates without automatically writing to the topic center", async () => {
   const route = await readFile(new URL("../app/api/trends/route.ts", import.meta.url), "utf8");
   const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
   const database = await readFile(new URL("../lib/database.ts", import.meta.url), "utf8");
@@ -154,7 +154,10 @@ test("uses account-aware layered keywords and quality gates before creating topi
   assert.match(route, /relevance \* \.55 \+ intent \* \.25 \+ heatScores\[index\] \* \.20/);
   assert.match(route, /information >= 60 && remix >= 60 && accountFit >= 55/);
   assert.match(route, /qualityTier === "core"/);
-  assert.match(route, /sources\.length < 2/);
+  const analysisBlock = route.slice(route.indexOf('action === "analyze_scan"'), route.indexOf('action === "create_topics_bulk"'));
+  assert.doesNotMatch(analysisBlock, /INSERT INTO topics/);
+  assert.match(analysisBlock, /未写入选题中心/);
+  assert.doesNotMatch(analysisSchema, /"topics"/);
   assert.match(route, /恢复已完成搜索的失败任务/);
   assert.match(route, /recovered_failed_screen: true/);
   assert.match(analysisSchema, /"visible_proof_score"/);
@@ -164,6 +167,7 @@ test("uses account-aware layered keywords and quality gates before creating topi
   assert.match(source, /目标内容账号/);
   assert.match(source, /生成搜索计划/);
   assert.match(source, /趋势信号/);
+  assert.match(source, /系统未写入选题中心/);
   assert.match(source, /update_account_strategy/);
 });
 

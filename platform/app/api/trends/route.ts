@@ -613,9 +613,9 @@ export async function POST(request: Request) {
       intent_match_score: sample.intent_match_score, account_fit_prefilter_score: sample.account_fit_score, prefilter_score: sample.prefilter_score,
       detail: String(sample.detail_text || "").slice(0, 2500),
     }));
-    let analysis: { overview: string; sample_analyses: Array<{ feed_id: string; summary: string; hook_points: string[]; title_hook: string; visual_highlight: string; pain_point: string; practical_value: string; controversy_point: string; content_structure: string[]; reusable_directions: string[]; account_adaptation: string; is_relevant: boolean; relevance_score: number; information_density_score: number; remix_value_score: number; account_fit_score: number; visible_proof_score: number; reproducibility_score: number; selection_reason: string }>; topics: Array<{ title: string; brief: string; target_audience: string; pain_point: string; hook_points: string[]; content_structure: string[]; why_it_works: string; account_fit: string; source_feed_ids: string[]; score: number }> };
+    let analysis: { overview: string; sample_analyses: Array<{ feed_id: string; summary: string; hook_points: string[]; title_hook: string; visual_highlight: string; pain_point: string; practical_value: string; controversy_point: string; content_structure: string[]; reusable_directions: string[]; account_adaptation: string; is_relevant: boolean; relevance_score: number; information_density_score: number; remix_value_score: number; account_fit_score: number; visible_proof_score: number; reproducibility_score: number; selection_reason: string }> };
     try { analysis = await codex("topic-analysis", `
-你是小红书选题研究员。根据真实搜索样本，生成3到8个原创、可领取的团队选题。
+你是小红书样本研究员。根据真实搜索样本逐条完成摘要、爆点拆解和质量分层，不生成团队选题。
 用户原始任务：${scan.request_text || scan.theme}
 目标账号资料：${JSON.stringify({ ...targetAccount, content_pillars: parseList(String(targetAccount.content_pillars || "[]")), strategy_keywords: parseList(String(targetAccount.strategy_keywords || "[]")), excluded_topics: parseList(String(targetAccount.excluded_topics || "[]")) })}
 
@@ -628,8 +628,7 @@ export async function POST(request: Request) {
 6. 分享数为“未提供”时不得推测；不得将互动量等同于官方流量排名，也不得承诺爆款。
 7. account_fit_score 只评价这个目标账号是否有身份、素材和表达能力创作；visible_proof_score 评价正文中是否有案例、步骤、数字、截图描述等可验证依据；reproducibility_score 评价团队能否在不照搬原文的前提下复现内容价值。
 8. 高质量核心样本标准：relevance_score>=70、information_density_score>=60、remix_value_score>=60、account_fit_score>=55。正文空泛、仅有情绪没有事实依据时必须降低信息密度和可见证据分。
-9. 每个原创选题必须组合至少2条高质量核心样本的真实 source_feed_ids，并说明适合谁、痛点、爆点、结构和账号匹配；不能由单篇笔记直接改写。
-10. 标题要是原创选题方向，不是直接发布文案。
+9. 本步骤不得生成、推荐或写入任何正式选题；正式选题只能由工作人员在页面点击单条或批量“转入选题中心”后创建。
 
 <UNTRUSTED_SAMPLES>
 ${JSON.stringify(samplePayload)}
@@ -666,28 +665,9 @@ ${JSON.stringify(samplePayload)}
           JSON.stringify(cleanList(item.reusable_directions, 0, 5)), String(item.account_adaptation || "").slice(0, 1200), relevance, information, remix, accountFit, visibleProof, reproducibility, finalQuality,
           qualityTier, String(item.selection_reason || "").slice(0, 600), qualityTier === "core" ? "selected" : qualityTier === "signal" ? "signal" : "not_selected", feedId).run();
     }
-    let created = 0;
-    for (const topic of analysis.topics) {
-      const title = String(topic.title || "").trim();
-      if (!title) continue;
-      const existing = await db.prepare("SELECT id FROM topics WHERE lower(trim(title))=lower(trim(?)) AND archived_at IS NULL").bind(title).first();
-      if (existing) continue;
-      const sources = [...new Set((topic.source_feed_ids || []).map(String).filter((id) => qualifiedFeedIds.has(id)))];
-      if (sources.length < 2) continue;
-      const topicId = crypto.randomUUID();
-      const sourceUrl = `https://www.xiaohongshu.com/explore/${sources[0]}`;
-      await db.batch([
-        db.prepare("INSERT INTO topics (id,title,source_url,relevance,status,created_by,created_at) VALUES (?,?,?,'高','unclaimed',?,?)").bind(topicId, title, sourceUrl, user.id, nowIso),
-        db.prepare(`INSERT INTO topic_insights (topic_id,brief,target_audience,pain_point,hook_points,content_structure,why_it_works,account_fit,source_feed_ids,score,created_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(topicId, topic.brief, topic.target_audience, topic.pain_point, JSON.stringify(topic.hook_points), JSON.stringify(topic.content_structure), topic.why_it_works, topic.account_fit, JSON.stringify(sources), Math.max(0, Math.min(100, Number(topic.score) || 0)), nowIso),
-      ]);
-      for (const feedId of sources) await db.prepare("UPDATE trend_samples SET status='used' WHERE feed_id=?").bind(feedId).run();
-      created += 1;
-    }
-    const warning = qualifiedFeedIds.size < 2 ? "高质量核心样本不足2条，本次只保存样本分层，不自动生成团队选题" : "";
-    await db.prepare("UPDATE trend_scans SET status='analyzed',analysis_overview=? WHERE id=?").bind([analysis.overview, warning].filter(Boolean).join("\n"), scan.id).run();
-    await audit(user.id, "AI完成样本分层并生成原创选题", "trend_scan", scan.id, `${qualifiedFeedIds.size} 条核心样本 / ${created} 个多来源原创选题`);
-    return Response.json({ ok: true, created, core_samples: qualifiedFeedIds.size, warning, overview: analysis.overview });
+    await db.prepare("UPDATE trend_scans SET status='analyzed',analysis_overview=? WHERE id=?").bind(analysis.overview, scan.id).run();
+    await audit(user.id, "AI完成样本拆解与质量分层", "trend_scan", scan.id, `${qualifiedFeedIds.size} 条核心样本 / 未写入选题中心`);
+    return Response.json({ ok: true, created: 0, core_samples: qualifiedFeedIds.size, auto_topic_creation: false, overview: analysis.overview });
   }
 
   if (action === "create_topics_bulk") {
