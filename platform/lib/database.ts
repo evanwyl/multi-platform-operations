@@ -26,6 +26,7 @@ const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL,
     persona TEXT NOT NULL DEFAULT '', audience TEXT NOT NULL DEFAULT '',
+    content_pillars TEXT NOT NULL DEFAULT '[]', strategy_keywords TEXT NOT NULL DEFAULT '[]', excluded_topics TEXT NOT NULL DEFAULT '[]',
     queue_count INTEGER NOT NULL DEFAULT 0, color TEXT NOT NULL,
     mcp_port INTEGER NOT NULL DEFAULT 18060, is_demo INTEGER NOT NULL DEFAULT 0,
     xhs_user_id TEXT, xhs_nickname TEXT,
@@ -65,14 +66,14 @@ const schemaStatements = [
     created_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS trend_settings (
-    id TEXT PRIMARY KEY, account_id TEXT,
+    id TEXT PRIMARY KEY, account_id TEXT, target_account_id TEXT,
     keywords TEXT NOT NULL DEFAULT '[]', exclude_keywords TEXT NOT NULL DEFAULT '[]',
     publish_time TEXT NOT NULL DEFAULT '一周内', sort_by TEXT NOT NULL DEFAULT '最多点赞', content_type TEXT NOT NULL DEFAULT 'image',
     last_scanned_at TEXT, next_allowed_at TEXT, updated_at TEXT NOT NULL,
-    FOREIGN KEY(account_id) REFERENCES accounts(id)
+    FOREIGN KEY(account_id) REFERENCES accounts(id), FOREIGN KEY(target_account_id) REFERENCES accounts(id)
   )`,
   `CREATE TABLE IF NOT EXISTS trend_scans (
-    id TEXT PRIMARY KEY, account_id TEXT NOT NULL, keywords TEXT NOT NULL,
+    id TEXT PRIMARY KEY, account_id TEXT NOT NULL, target_account_id TEXT, keywords TEXT NOT NULL, keyword_plan TEXT NOT NULL DEFAULT '{}',
     request_text TEXT NOT NULL DEFAULT '', theme TEXT NOT NULL DEFAULT '', analysis_overview TEXT NOT NULL DEFAULT '',
     publish_time TEXT NOT NULL, sort_by TEXT NOT NULL, content_type TEXT NOT NULL DEFAULT 'image', status TEXT NOT NULL,
     completed_keywords TEXT NOT NULL DEFAULT '[]', result_count INTEGER NOT NULL DEFAULT 0,
@@ -92,6 +93,8 @@ const schemaStatements = [
     title_hook TEXT NOT NULL DEFAULT '', visual_highlight TEXT NOT NULL DEFAULT '', emotion_pain TEXT NOT NULL DEFAULT '',
     practical_value TEXT NOT NULL DEFAULT '', controversy_point TEXT NOT NULL DEFAULT '', reusable_directions TEXT NOT NULL DEFAULT '[]', account_adaptation TEXT NOT NULL DEFAULT '',
     relevance_score INTEGER NOT NULL DEFAULT 0, information_density_score INTEGER NOT NULL DEFAULT 0, remix_value_score INTEGER NOT NULL DEFAULT 0, selection_reason TEXT NOT NULL DEFAULT '',
+    intent_match_score INTEGER NOT NULL DEFAULT 0, account_fit_score INTEGER NOT NULL DEFAULT 0, prefilter_score INTEGER NOT NULL DEFAULT 0,
+    visible_proof_score INTEGER NOT NULL DEFAULT 0, reproducibility_score INTEGER NOT NULL DEFAULT 0, final_quality_score INTEGER NOT NULL DEFAULT 0, quality_tier TEXT NOT NULL DEFAULT 'unrated',
     selection_status TEXT NOT NULL DEFAULT 'candidate', processing_status TEXT NOT NULL DEFAULT 'pending', capture_outcome TEXT NOT NULL DEFAULT 'new', detail_error TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'new', first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL
   )`,
@@ -134,6 +137,13 @@ async function initializeDatabase() {
     const column = await db.prepare(`SELECT name FROM pragma_table_info('accounts') WHERE name='${name}'`).first();
     if (!column) await db.prepare(`ALTER TABLE accounts ADD COLUMN ${name} ${type}`).run();
   }
+  const strategyColumns = [
+    ["content_pillars", "TEXT NOT NULL DEFAULT '[]'"], ["strategy_keywords", "TEXT NOT NULL DEFAULT '[]'"], ["excluded_topics", "TEXT NOT NULL DEFAULT '[]'"],
+  ] as const;
+  for (const [name, type] of strategyColumns) {
+    const column = await db.prepare(`SELECT name FROM pragma_table_info('accounts') WHERE name='${name}'`).first();
+    if (!column) await db.prepare(`ALTER TABLE accounts ADD COLUMN ${name} ${type}`).run();
+  }
   const trendSampleColumns = [
     ["xsec_token", "TEXT NOT NULL DEFAULT ''"], ["detail_text", "TEXT NOT NULL DEFAULT ''"],
     ["heat_score", "INTEGER NOT NULL DEFAULT 0"], ["published_at", "TEXT"],
@@ -147,6 +157,10 @@ async function initializeDatabase() {
     ["account_adaptation", "TEXT NOT NULL DEFAULT ''"], ["selection_status", "TEXT NOT NULL DEFAULT 'candidate'"],
     ["relevance_score", "INTEGER NOT NULL DEFAULT 0"], ["information_density_score", "INTEGER NOT NULL DEFAULT 0"],
     ["remix_value_score", "INTEGER NOT NULL DEFAULT 0"], ["selection_reason", "TEXT NOT NULL DEFAULT ''"],
+    ["intent_match_score", "INTEGER NOT NULL DEFAULT 0"], ["account_fit_score", "INTEGER NOT NULL DEFAULT 0"],
+    ["prefilter_score", "INTEGER NOT NULL DEFAULT 0"], ["visible_proof_score", "INTEGER NOT NULL DEFAULT 0"],
+    ["reproducibility_score", "INTEGER NOT NULL DEFAULT 0"], ["final_quality_score", "INTEGER NOT NULL DEFAULT 0"],
+    ["quality_tier", "TEXT NOT NULL DEFAULT 'unrated'"],
     ["processing_status", "TEXT NOT NULL DEFAULT 'pending'"], ["capture_outcome", "TEXT NOT NULL DEFAULT 'new'"],
     ["detail_error", "TEXT NOT NULL DEFAULT ''"],
   ] as const;
@@ -160,12 +174,12 @@ async function initializeDatabase() {
     await db.prepare("UPDATE trend_samples SET matched_keywords=?,selection_status=?,processing_status=? WHERE id=?")
       .bind(JSON.stringify(sample.keyword ? [String(sample.keyword)] : []), hasResearchData ? "selected" : "candidate", sample.detail_text ? "success" : "pending", sample.id).run();
   }
-  const trendSettingsColumns = [["content_type", "TEXT NOT NULL DEFAULT 'image'"]] as const;
+  const trendSettingsColumns = [["content_type", "TEXT NOT NULL DEFAULT 'image'"], ["target_account_id", "TEXT"]] as const;
   for (const [name, type] of trendSettingsColumns) {
     const column = await db.prepare(`SELECT name FROM pragma_table_info('trend_settings') WHERE name='${name}'`).first();
     if (!column) await db.prepare(`ALTER TABLE trend_settings ADD COLUMN ${name} ${type}`).run();
   }
-  const trendScanColumns = [["request_text", "TEXT NOT NULL DEFAULT ''"], ["theme", "TEXT NOT NULL DEFAULT ''"], ["analysis_overview", "TEXT NOT NULL DEFAULT ''"], ["content_type", "TEXT NOT NULL DEFAULT 'image'"]] as const;
+  const trendScanColumns = [["request_text", "TEXT NOT NULL DEFAULT ''"], ["theme", "TEXT NOT NULL DEFAULT ''"], ["analysis_overview", "TEXT NOT NULL DEFAULT ''"], ["content_type", "TEXT NOT NULL DEFAULT 'image'"], ["target_account_id", "TEXT"], ["keyword_plan", "TEXT NOT NULL DEFAULT '{}' "]] as const;
   for (const [name, type] of trendScanColumns) {
     const column = await db.prepare(`SELECT name FROM pragma_table_info('trend_scans') WHERE name='${name}'`).first();
     if (!column) await db.prepare(`ALTER TABLE trend_scans ADD COLUMN ${name} ${type}`).run();

@@ -21,6 +21,7 @@ const xhsExpertSkill = process.env.XHS_EXPERT_SKILL || join(homedir(), ".codex/s
 const imagegenSkill = process.env.IMAGEGEN_SKILL || join(homedir(), ".codex/skills/.system/imagegen/SKILL.md");
 const analysisSchemas = {
   "trend-plan": resolve(process.cwd(), "runtime/trend-plan.schema.json"),
+  "candidate-screen": resolve(process.cwd(), "runtime/candidate-screen.schema.json"),
   "topic-analysis": resolve(process.cwd(), "runtime/topic-analysis.schema.json"),
   "content-draft": resolve(process.cwd(), "runtime/content-draft.schema.json"),
 };
