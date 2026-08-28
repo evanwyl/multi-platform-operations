@@ -48,6 +48,16 @@ test("keeps AI creation mounted and recommends whole-post image prompts without 
   assert.match(source, /contentStageLabel/);
 });
 
+test("includes successfully fetched source notes as protected rewrite references", async () => {
+  const route = await readFile(new URL("../app/api/creation/route.ts", import.meta.url), "utf8");
+  assert.match(route, /source_feed_ids/);
+  assert.match(route, /FROM trend_samples/);
+  assert.match(route, /processing_status='success' AND detail_text!=''/);
+  assert.match(route, /<UNTRUSTED_SOURCE_NOTES>/);
+  assert.match(route, /不得复制原文标题、连续句子、独特表达/);
+  assert.match(route, /不得把来源作者的经历写成发布账号的亲身经历/);
+});
+
 test("starts Xiaohongshu collection in headed browser mode", async () => {
   const runtime = await readFile(new URL("../runtime/manager.mjs", import.meta.url), "utf8");
   assert.match(runtime, /const HEADED_BROWSER = true/);
