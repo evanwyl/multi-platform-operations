@@ -9,6 +9,8 @@ type PublishClaim = {
   snapshot: string | null; publish_images: string; title: string; body: string; tags: string;
 };
 
+const PUBLISH_TIMEOUT_MS = 6 * 60 * 1000;
+
 async function runtime(path: "acquire" | "release" | "discard", accountId: string) {
   const response = await fetch(`http://127.0.0.1:18100/${path}`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ accountId, purpose: "worker" }),
@@ -25,7 +27,7 @@ export async function POST(request: Request) {
   if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
   const userRoles = JSON.parse(user.roles) as string[];
   if (!userRoles.some((role) => ["admin", "publisher"].includes(role))) return Response.json({ error: "你没有发布权限" }, { status: 403 });
-  const data = await request.json() as { action?: string; claim_id?: string; files?: PublishFile[] };
+  const data = await request.json() as { action?: string; claim_id?: string; reason?: string; files?: PublishFile[] };
   const claimId = String(data.claim_id ?? "");
   const db = database();
   const claim = await db.prepare(`SELECT c.id,c.account_id,c.status,c.snapshot,c.publish_images,c.title,c.body,c.tags,
@@ -33,10 +35,23 @@ export async function POST(request: Request) {
     FROM claims c JOIN accounts a ON a.id=c.account_id WHERE c.id=? AND a.is_demo=0`).bind(claimId).first<PublishClaim>();
   if (!claim) return Response.json({ error: "发布任务不存在" }, { status: 404 });
 
+  if (data.action === "return_for_revision") {
+    if (!["approved", "queued", "failed"].includes(claim.status)) {
+      return Response.json({ error: claim.status === "publishing" ? "内容正在发布，不能同时退回修改" : "只有尚未发布的内容可以退回修改" }, { status: 409 });
+    }
+    const reason = String(data.reason ?? "").trim();
+    if (!reason) return Response.json({ error: "退回修改时必须填写原因" }, { status: 400 });
+    const returnedAt = new Date().toISOString();
+    await db.prepare("UPDATE claims SET status='revision',review_comment=?,publisher_id=NULL,publish_error='',updated_at=? WHERE id=?")
+      .bind(reason.slice(0, 500), returnedAt, claim.id).run();
+    await audit(user.id, "发布前退回修改", "claim", claim.id, `${claim.account_name} / ${reason.slice(0, 300)}`);
+    return Response.json({ ok: true, status: "revision" });
+  }
+
   if (data.action === "upload_images") {
     if (!["approved", "queued", "failed"].includes(claim.status)) return Response.json({ error: "只有审核通过且尚未发布的内容可以准备配图" }, { status: 409 });
     const files = Array.isArray(data.files) ? data.files.slice(0, 9) : [];
-    if (!files.length || files.some((file) => !file.data || !file.type)) return Response.json({ error: "请选择1–9张有效图片" }, { status: 400 });
+    if (!files.length || files.some((file) => !file.data || !file.type)) return Response.json({ error: "请选择1-9张有效图片" }, { status: 400 });
     const response = await fetch("http://127.0.0.1:18100/publish-assets", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ claimId, files }),
     }).catch(() => null);
@@ -70,12 +85,12 @@ export async function POST(request: Request) {
       }
       if (claim.xhs_nickname && login.nickname && claim.xhs_nickname !== login.nickname) throw new Error(`账号身份不匹配：预期 ${claim.xhs_nickname}，实际 ${login.nickname}`);
       const startedAt = new Date().toISOString();
-      await db.prepare("UPDATE claims SET status='publishing',publish_error='',updated_at=? WHERE id=?").bind(startedAt, claim.id).run();
+      await db.prepare("UPDATE claims SET status='publishing',publisher_id=?,publish_error='',updated_at=? WHERE id=?").bind(user.id, startedAt, claim.id).run();
       const cleanTags = tags.map((tag) => String(tag).replace(/^#+/, "").trim()).filter(Boolean);
-      const result = await callMcpTool(port, "publish_content", { title, content: body, images, tags: cleanTags }, 3 * 60 * 1000);
+      const result = await callMcpTool(port, "publish_content", { title, content: body, images, tags: cleanTags }, PUBLISH_TIMEOUT_MS);
       const publishedAt = new Date().toISOString();
       await db.prepare("UPDATE claims SET status='published',published_at=?,publish_error='',updated_at=? WHERE id=?").bind(publishedAt, publishedAt, claim.id).run();
-      await audit(user.id, "通过小红书MCP发布内容", "claim", claim.id, `${claim.account_name} / ${images.length} 张图片`);
+      await audit(user.id, "通过小红书MCP发布内容", "claim", claim.id, `${claim.account_name} / 发布人 ${user.name} / ${images.length} 张图片`);
       await runtime("release", claim.account_id); acquired = false;
       return Response.json({ ok: true, published_at: publishedAt, detail: result.filter((item) => item.type === "text").map((item) => item.text).join("\n") });
     } catch (error) {

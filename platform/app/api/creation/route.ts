@@ -20,8 +20,6 @@ type ClaimContext = {
   content_structure: string; why_it_works: string; account_fit: string;
 };
 
-function roles(user: DbUser) { return JSON.parse(user.roles) as string[]; }
-
 async function requireUser(request: Request) {
   const user = await currentUser(request);
   if (!user) throw new Response(JSON.stringify({ error: "请先登录" }), { status: 401, headers: { "content-type": "application/json" } });
@@ -69,7 +67,7 @@ async function claimContext(id: string) {
 }
 
 function canEdit(user: DbUser, claim: ClaimContext) {
-  return claim.owner_id === user.id || roles(user).includes("admin");
+  return Boolean(user.id && claim.id);
 }
 
 async function codex<T>(kind: "content-draft", prompt: string) {
@@ -108,7 +106,7 @@ export async function GET(request: Request) {
   const id = new URL(request.url).searchParams.get("id") || "";
   const claim = await claimContext(id);
   if (!claim) return Response.json({ error: "内容任务不存在" }, { status: 404 });
-  if (!canEdit(user, claim)) return Response.json({ error: "你没有查看这个创作任务的权限" }, { status: 403 });
+  if (!canEdit(user, claim)) return Response.json({ error: "当前账号无法查看这个团队任务" }, { status: 403 });
   const versions = await database().prepare(`SELECT id,version_number,source,title,created_at FROM claim_versions
     WHERE claim_id=? ORDER BY version_number DESC LIMIT 20`).bind(id).all();
   return Response.json({ creative: parseJson(claim.creative_json, {}), versions: versions.results });
@@ -123,7 +121,7 @@ export async function POST(request: Request) {
   const id = String(data.id ?? "");
   let claim = await claimContext(id);
   if (!claim) return Response.json({ error: "内容任务不存在" }, { status: 404 });
-  if (!canEdit(user, claim)) return Response.json({ error: "只有负责人可以编辑" }, { status: 403 });
+  if (!canEdit(user, claim)) return Response.json({ error: "当前账号无法编辑这个团队任务" }, { status: 403 });
   if (!["writing", "revision"].includes(claim.status)) return Response.json({ error: "当前内容状态不能继续创作" }, { status: 409 });
 
   if (action === "generate") {

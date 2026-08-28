@@ -14,6 +14,7 @@ const HEADED_BROWSER = true;
 const root = resolve(process.cwd(), "runtime/accounts");
 const analysisRoot = resolve(process.cwd(), "runtime/analysis");
 const publishAssetRoot = resolve(process.cwd(), "runtime/publish-assets");
+const trendCoverRoot = resolve(process.cwd(), "public/trend-covers");
 const binary = process.env.XHS_MCP_BINARY || join(homedir(), ".hermes/services/xiaohongshu-mcp/bin/xiaohongshu-mcp-darwin-arm64");
 const codexBinary = process.env.CODEX_BINARY || "/Applications/ChatGPT.app/Contents/Resources/codex";
 const xhsExpertSkill = process.env.XHS_EXPERT_SKILL || join(homedir(), ".codex/skills/xiaohongshu-operations-expert/SKILL.md");
@@ -27,6 +28,7 @@ const analysisSchemas = {
 mkdirSync(root, { recursive: true });
 mkdirSync(analysisRoot, { recursive: true });
 mkdirSync(publishAssetRoot, { recursive: true });
+mkdirSync(trendCoverRoot, { recursive: true });
 if (!existsSync(binary)) {
   process.stderr.write(`找不到小红书 MCP：${binary}\n`);
   process.exit(1);
@@ -39,6 +41,7 @@ const slots = [
 const acquireQueue = [];
 const QUEUE_TIMEOUT_MS = 10 * 60 * 1000;
 let analysisBusy = false;
+let analysisChild = null;
 let drainingQueue = false;
 
 function validAccountId(value) {
@@ -47,6 +50,44 @@ function validAccountId(value) {
 
 function validPurpose(value) {
   return value === "worker" || value === "verification";
+}
+
+function validTrendFeedId(value) {
+  return typeof value === "string" && /^[a-zA-Z0-9_-]{8,100}$/.test(value);
+}
+
+function allowedXhsImageUrl(value) {
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol)
+      && (url.hostname === "xhscdn.com" || url.hostname.endsWith(".xhscdn.com"));
+  } catch { return false; }
+}
+
+async function cacheTrendCover(feedId, sourceUrl) {
+  if (!validTrendFeedId(feedId) || !allowedXhsImageUrl(sourceUrl)) {
+    throw Object.assign(new Error("头图地址或笔记标识不合法"), { status: 400 });
+  }
+  for (const extension of ["jpg", "png", "webp", "avif"]) {
+    if (existsSync(join(trendCoverRoot, `${feedId}.${extension}`))) return `/trend-covers/${feedId}.${extension}`;
+  }
+  const remote = await fetch(sourceUrl, {
+    redirect: "follow",
+    signal: AbortSignal.timeout(15_000),
+    headers: {
+      accept: "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8,*/*;q=0.5",
+      referer: "https://www.xiaohongshu.com/",
+      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140 Safari/537.36",
+    },
+  });
+  if (!remote.ok || !allowedXhsImageUrl(remote.url)) throw Object.assign(new Error(`下载头图失败（${remote.status}）`), { status: 502 });
+  const mime = String(remote.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+  const extension = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : mime === "image/avif" ? "avif" : ["image/jpeg", "image/jpg"].includes(mime) ? "jpg" : "";
+  if (!extension) throw Object.assign(new Error("小红书返回的头图格式不支持"), { status: 502 });
+  const buffer = Buffer.from(await remote.arrayBuffer());
+  if (!buffer.length || buffer.length > 12 * 1024 * 1024) throw Object.assign(new Error("头图为空或超过12MB"), { status: 502 });
+  writeFileSync(join(trendCoverRoot, `${feedId}.${extension}`), buffer, { mode: 0o600 });
+  return `/trend-covers/${feedId}.${extension}`;
 }
 
 function leaseResult(slot) {
@@ -81,9 +122,11 @@ async function runCodex(kind, prompt) {
       const child = spawn(codexBinary, ["exec", "--sandbox", "read-only", "--ephemeral", "--ignore-user-config", "--skip-git-repo-check", "--output-schema", schema, "--color", "never", "-"], {
         cwd: analysisRoot, env: process.env, stdio: ["pipe", "pipe", "pipe"],
       });
+      analysisChild = child;
       let stdout = ""; let stderr = ""; let settled = false;
       const finish = (error, result) => {
         if (settled) return; settled = true; clearTimeout(timer);
+        if (analysisChild === child) analysisChild = null;
         if (error) rejectPromise(error); else resolvePromise(result);
       };
       child.stdout.on("data", (chunk) => { if (stdout.length < 2_000_000) stdout += chunk.toString(); });
@@ -98,6 +141,15 @@ async function runCodex(kind, prompt) {
       child.stdin.end(skilledPrompt);
     });
   } finally { analysisBusy = false; }
+}
+
+function cancelAnalysis() {
+  if (!analysisChild || analysisChild.exitCode !== null) return false;
+  const child = analysisChild;
+  child.kill("SIGTERM");
+  const timer = setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); }, 3000);
+  timer.unref();
+  return true;
 }
 
 async function ready(port, child) {
@@ -237,10 +289,13 @@ const server = createServer(async (request, response) => {
       const result = await runCodex(payload.kind, payload.prompt);
       return json(response, 200, result);
     }
+    if (request.method === "POST" && url.pathname === "/codex/cancel") {
+      return json(response, 200, { ok: true, cancelled: cancelAnalysis() });
+    }
     if (request.method === "POST" && url.pathname === "/publish-assets") {
       const payload = await body(request);
       if (!validAccountId(payload.claimId)) return json(response, 400, { error: "内容任务标识不合法" });
-      if (!Array.isArray(payload.files) || !payload.files.length || payload.files.length > 9) return json(response, 400, { error: "每篇笔记需要上传1–9张图片" });
+      if (!Array.isArray(payload.files) || !payload.files.length || payload.files.length > 9) return json(response, 400, { error: "每篇笔记需要上传1-9张图片" });
       const claimRoot = join(publishAssetRoot, payload.claimId);
       mkdirSync(claimRoot, { recursive: true });
       let totalBytes = 0;
@@ -256,6 +311,11 @@ const server = createServer(async (request, response) => {
         return path;
       });
       return json(response, 200, { ok: true, paths });
+    }
+    if (request.method === "POST" && url.pathname === "/cover-cache") {
+      const payload = await body(request);
+      const path = await cacheTrendCover(payload.feedId, payload.sourceUrl);
+      return json(response, 200, { ok: true, path });
     }
     if (request.method === "POST" && ["/acquire", "/release", "/discard", "/touch"].includes(url.pathname)) {
       const payload = await body(request);
@@ -296,6 +356,7 @@ const sweep = setInterval(() => {
 sweep.unref();
 
 function shutdown() {
+  cancelAnalysis();
   for (const slot of slots) stop(slot, "平台关闭");
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3500).unref();

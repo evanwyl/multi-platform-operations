@@ -47,7 +47,7 @@ const schemaStatements = [
     creative_json TEXT NOT NULL DEFAULT '{}', creation_status TEXT NOT NULL DEFAULT 'idle',
     creation_error TEXT NOT NULL DEFAULT '', creation_prompt TEXT NOT NULL DEFAULT '',
     version_number INTEGER NOT NULL DEFAULT 0, generated_at TEXT,
-    publish_images TEXT NOT NULL DEFAULT '[]', publish_error TEXT NOT NULL DEFAULT '', published_at TEXT,
+    publish_images TEXT NOT NULL DEFAULT '[]', publish_error TEXT NOT NULL DEFAULT '', published_at TEXT, publisher_id TEXT,
     created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
     FOREIGN KEY(topic_id) REFERENCES topics(id), FOREIGN KEY(account_id) REFERENCES accounts(id),
     FOREIGN KEY(owner_id) REFERENCES users(id)
@@ -84,8 +84,15 @@ const schemaStatements = [
     title TEXT NOT NULL, author_name TEXT NOT NULL DEFAULT '', author_id TEXT NOT NULL DEFAULT '',
     note_type TEXT NOT NULL DEFAULT '', cover_url TEXT NOT NULL DEFAULT '', source_url TEXT NOT NULL,
     xsec_token TEXT NOT NULL DEFAULT '', detail_text TEXT NOT NULL DEFAULT '',
-    liked_count TEXT NOT NULL DEFAULT '0', collected_count TEXT NOT NULL DEFAULT '0', comment_count TEXT NOT NULL DEFAULT '0',
-    heat_score INTEGER NOT NULL DEFAULT 0, published_at TEXT,
+    content_summary TEXT NOT NULL DEFAULT '', sample_hooks TEXT NOT NULL DEFAULT '[]',
+    sample_pain_point TEXT NOT NULL DEFAULT '', sample_structure TEXT NOT NULL DEFAULT '[]',
+    matched_keywords TEXT NOT NULL DEFAULT '[]', original_tags TEXT NOT NULL DEFAULT '[]',
+    liked_count TEXT NOT NULL DEFAULT '0', collected_count TEXT NOT NULL DEFAULT '0', comment_count TEXT NOT NULL DEFAULT '0', shared_count TEXT NOT NULL DEFAULT '',
+    raw_heat_score REAL NOT NULL DEFAULT 0, heat_score INTEGER NOT NULL DEFAULT 0, published_at TEXT,
+    title_hook TEXT NOT NULL DEFAULT '', visual_highlight TEXT NOT NULL DEFAULT '', emotion_pain TEXT NOT NULL DEFAULT '',
+    practical_value TEXT NOT NULL DEFAULT '', controversy_point TEXT NOT NULL DEFAULT '', reusable_directions TEXT NOT NULL DEFAULT '[]', account_adaptation TEXT NOT NULL DEFAULT '',
+    relevance_score INTEGER NOT NULL DEFAULT 0, information_density_score INTEGER NOT NULL DEFAULT 0, remix_value_score INTEGER NOT NULL DEFAULT 0, selection_reason TEXT NOT NULL DEFAULT '',
+    selection_status TEXT NOT NULL DEFAULT 'candidate', processing_status TEXT NOT NULL DEFAULT 'pending', capture_outcome TEXT NOT NULL DEFAULT 'new', detail_error TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'new', first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS topic_insights (
@@ -130,10 +137,28 @@ async function initializeDatabase() {
   const trendSampleColumns = [
     ["xsec_token", "TEXT NOT NULL DEFAULT ''"], ["detail_text", "TEXT NOT NULL DEFAULT ''"],
     ["heat_score", "INTEGER NOT NULL DEFAULT 0"], ["published_at", "TEXT"],
+    ["content_summary", "TEXT NOT NULL DEFAULT ''"], ["sample_hooks", "TEXT NOT NULL DEFAULT '[]'"],
+    ["sample_pain_point", "TEXT NOT NULL DEFAULT ''"], ["sample_structure", "TEXT NOT NULL DEFAULT '[]'"],
+    ["matched_keywords", "TEXT NOT NULL DEFAULT '[]'"], ["original_tags", "TEXT NOT NULL DEFAULT '[]'"],
+    ["shared_count", "TEXT NOT NULL DEFAULT ''"], ["raw_heat_score", "REAL NOT NULL DEFAULT 0"],
+    ["title_hook", "TEXT NOT NULL DEFAULT ''"], ["visual_highlight", "TEXT NOT NULL DEFAULT ''"],
+    ["emotion_pain", "TEXT NOT NULL DEFAULT ''"], ["practical_value", "TEXT NOT NULL DEFAULT ''"],
+    ["controversy_point", "TEXT NOT NULL DEFAULT ''"], ["reusable_directions", "TEXT NOT NULL DEFAULT '[]'"],
+    ["account_adaptation", "TEXT NOT NULL DEFAULT ''"], ["selection_status", "TEXT NOT NULL DEFAULT 'candidate'"],
+    ["relevance_score", "INTEGER NOT NULL DEFAULT 0"], ["information_density_score", "INTEGER NOT NULL DEFAULT 0"],
+    ["remix_value_score", "INTEGER NOT NULL DEFAULT 0"], ["selection_reason", "TEXT NOT NULL DEFAULT ''"],
+    ["processing_status", "TEXT NOT NULL DEFAULT 'pending'"], ["capture_outcome", "TEXT NOT NULL DEFAULT 'new'"],
+    ["detail_error", "TEXT NOT NULL DEFAULT ''"],
   ] as const;
   for (const [name, type] of trendSampleColumns) {
     const column = await db.prepare(`SELECT name FROM pragma_table_info('trend_samples') WHERE name='${name}'`).first();
     if (!column) await db.prepare(`ALTER TABLE trend_samples ADD COLUMN ${name} ${type}`).run();
+  }
+  const legacyTrendSamples = await db.prepare("SELECT id,keyword,detail_text,content_summary,heat_score FROM trend_samples WHERE matched_keywords='[]'").all();
+  for (const sample of legacyTrendSamples.results) {
+    const hasResearchData = Boolean(sample.detail_text || sample.content_summary || Number(sample.heat_score) > 0);
+    await db.prepare("UPDATE trend_samples SET matched_keywords=?,selection_status=?,processing_status=? WHERE id=?")
+      .bind(JSON.stringify(sample.keyword ? [String(sample.keyword)] : []), hasResearchData ? "selected" : "candidate", sample.detail_text ? "success" : "pending", sample.id).run();
   }
   const trendSettingsColumns = [["content_type", "TEXT NOT NULL DEFAULT 'image'"]] as const;
   for (const [name, type] of trendSettingsColumns) {
@@ -155,12 +180,15 @@ async function initializeDatabase() {
     if (!column) await db.prepare(`ALTER TABLE claims ADD COLUMN ${name} ${type}`).run();
   }
   const claimPublishColumns = [
-    ["publish_images", "TEXT NOT NULL DEFAULT '[]'"], ["publish_error", "TEXT NOT NULL DEFAULT ''"], ["published_at", "TEXT"],
+    ["publish_images", "TEXT NOT NULL DEFAULT '[]'"], ["publish_error", "TEXT NOT NULL DEFAULT ''"], ["published_at", "TEXT"], ["publisher_id", "TEXT"],
   ] as const;
   for (const [name, type] of claimPublishColumns) {
     const column = await db.prepare(`SELECT name FROM pragma_table_info('claims') WHERE name='${name}'`).first();
     if (!column) await db.prepare(`ALTER TABLE claims ADD COLUMN ${name} ${type}`).run();
   }
+  await db.prepare(`UPDATE claims SET publisher_id=(SELECT actor_id FROM audit_logs
+    WHERE object_type='claim' AND object_id=claims.id AND action='通过小红书MCP发布内容'
+    ORDER BY created_at DESC LIMIT 1) WHERE publisher_id IS NULL AND status='published'`).run();
   await db.prepare("UPDATE accounts SET is_demo=1 WHERE id IN ('acc-work','acc-home','acc-beauty','acc-city','acc-food')").run();
   await db.prepare("UPDATE accounts SET status='login_expired' WHERE is_demo=0 AND xhs_user_id IS NULL AND status='online'").run();
   await db.prepare("DROP INDEX IF EXISTS idx_accounts_mcp_port_real").run();

@@ -16,7 +16,10 @@ export async function callMcpTool(port: number, name: string, args: Record<strin
       method: "POST", headers: commonHeaders, signal,
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "hongshutai", version: "0.2.0" } } }),
     });
-  } catch { throw new Error("小红书 MCP 连接已中断"); }
+  } catch (error) {
+    if (timeoutMs && error instanceof Error && /Timeout|Abort/i.test(error.name)) throw new Error(`小红书 MCP 执行超过 ${Math.ceil(timeoutMs / 60_000)} 分钟，已安全停止，请稍后重试`);
+    throw new Error("小红书 MCP 连接已中断");
+  }
   if (!initialize.ok) throw new Error("小红书 MCP 没有响应");
   const sessionId = initialize.headers.get("mcp-session-id");
   if (!sessionId) throw new Error("小红书 MCP 未返回会话标识");
@@ -26,7 +29,10 @@ export async function callMcpTool(port: number, name: string, args: Record<strin
       method: "POST", headers: { ...commonHeaders, "mcp-session-id": sessionId }, signal,
       body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: args } }),
     });
-  } catch { throw new Error("小红书 MCP 执行中断，请稍后重试"); }
+  } catch (error) {
+    if (timeoutMs && error instanceof Error && /Timeout|Abort/i.test(error.name)) throw new Error(`小红书 MCP 执行超过 ${Math.ceil(timeoutMs / 60_000)} 分钟，已安全停止，请稍后重试`);
+    throw new Error("小红书 MCP 执行中断，请稍后重试");
+  }
   if (!response.ok) throw new Error(`小红书 MCP 调用失败（${response.status}）`);
   const payload = await response.json() as { error?: { message?: string }; result?: { content?: McpContent[]; isError?: boolean } };
   if (payload.error || payload.result?.isError) {

@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   const username = data.username?.trim().toLowerCase() ?? "";
   const password = data.password ?? "";
   if (!/^[a-z0-9_-]{3,24}$/.test(username) || password.length < 8) {
-    return Response.json({ error: "用户名需为3–24位字母/数字；密码至少8位" }, { status: 400 });
+    return Response.json({ error: "用户名需为3-24位字母/数字；密码至少8位" }, { status: 400 });
   }
 
   if (data.action === "setup") {
