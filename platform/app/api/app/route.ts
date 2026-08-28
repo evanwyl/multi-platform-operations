@@ -23,7 +23,8 @@ export async function GET(request: Request) {
       i.why_it_works,i.account_fit,i.source_feed_ids,i.score,
       COALESCE(s.source_url,t.source_url) AS source_url,s.author_name AS source_author,s.keyword AS source_keyword,
       s.liked_count,s.collected_count,s.comment_count,s.heat_score,s.first_seen_at AS captured_at,
-      s.published_at AS note_published_at,s.feed_id AS note_id,
+      s.published_at AS note_published_at,s.feed_id AS note_id,s.processing_status AS source_processing_status,
+      CASE WHEN s.processing_status='success' AND s.detail_text!='' THEN 1 ELSE 0 END AS source_detail_verified,
       latest_claim.status AS claim_status,claim_owner.name AS claim_owner_name
       FROM topics t
       JOIN users u ON u.id=t.created_by
@@ -32,11 +33,13 @@ export async function GET(request: Request) {
       LEFT JOIN claims latest_claim ON latest_claim.id=(SELECT c.id FROM claims c WHERE c.topic_id=t.id ORDER BY c.updated_at DESC LIMIT 1)
       LEFT JOIN users claim_owner ON claim_owner.id=latest_claim.owner_id
       WHERE t.archived_at IS NULL ORDER BY t.created_at DESC`).all(),
-    db.prepare(`SELECT c.*,t.title AS topic_title,a.name AS account_name,a.color AS account_color,u.name AS owner_name
+    db.prepare(`SELECT c.*,t.title AS topic_title,a.name AS account_name,a.color AS account_color,u.name AS owner_name,
+      publisher.name AS publisher_name
       FROM claims c JOIN topics t ON t.id=c.topic_id JOIN accounts a ON a.id=c.account_id JOIN users u ON u.id=c.owner_id
+      LEFT JOIN users publisher ON publisher.id=c.publisher_id
       WHERE a.is_demo=0 ORDER BY c.updated_at DESC`).all(),
     db.prepare("SELECT l.*,u.name AS actor_name FROM audit_logs l JOIN users u ON u.id=l.actor_id ORDER BY l.created_at DESC LIMIT 50").all(),
-    db.prepare("SELECT id,name,username,roles,status,created_at FROM users ORDER BY created_at").all(),
+    db.prepare("SELECT id,name,username,roles,status,created_at FROM users WHERE status='active' ORDER BY created_at").all(),
   ]);
   return Response.json({
     user: publicUser(user), accounts: accounts.results, topics: topics.results.map((topic) => ({
@@ -98,6 +101,22 @@ export async function POST(request: Request) {
     return Response.json({ ok: true, id }, { status: 201 });
   }
 
+  if (action === "remove_user") {
+    const roles = JSON.parse(user.roles) as string[];
+    if (!roles.includes("admin")) return Response.json({ error: "只有管理员可以删除成员" }, { status: 403 });
+    const targetId = String(data.user_id ?? "");
+    if (!targetId) return Response.json({ error: "请选择要删除的成员" }, { status: 400 });
+    if (targetId === user.id) return Response.json({ error: "管理员不能删除自己的当前账号" }, { status: 409 });
+    const target = await db.prepare("SELECT id,name,status FROM users WHERE id=?").bind(targetId).first<{ id: string; name: string; status: string }>();
+    if (!target || target.status !== "active") return Response.json({ error: "成员不存在或已经删除" }, { status: 404 });
+    await db.batch([
+      db.prepare("UPDATE users SET status='disabled' WHERE id=?").bind(target.id),
+      db.prepare("DELETE FROM sessions WHERE user_id=?").bind(target.id),
+    ]);
+    await audit(user.id, "删除团队成员", "user", target.id, `${target.name}（已撤销登录，历史记录保留）`);
+    return Response.json({ ok: true });
+  }
+
   if (action === "create_topic") {
     const title = String(data.title ?? "").trim();
     if (!title) return Response.json({ error: "请输入选题标题" }, { status: 400 });
@@ -108,10 +127,28 @@ export async function POST(request: Request) {
     return Response.json({ ok: true, id }, { status: 201 });
   }
 
+  if (action === "archive_topics_bulk") {
+    const topicIds = [...new Set((Array.isArray(data.topic_ids) ? data.topic_ids : []).map(String).filter(Boolean))].slice(0, 200);
+    if (!topicIds.length) return Response.json({ error: "请选择要删除的选题" }, { status: 400 });
+    const placeholders = topicIds.map(() => "?").join(",");
+    const activeTopics = await db.prepare(`SELECT id FROM topics WHERE archived_at IS NULL AND id IN (${placeholders})`)
+      .bind(...topicIds).all<{ id: string }>();
+    if (!activeTopics.results.length) return Response.json({ error: "所选选题不存在或已经删除" }, { status: 404 });
+    await db.batch(activeTopics.results.map((topic) => db.prepare("UPDATE topics SET archived_at=? WHERE id=? AND archived_at IS NULL").bind(now, topic.id)));
+    await audit(user.id, "批量删除选题", "topic", "bulk", `${activeTopics.results.length} 个选题（历史内容任务保留）`);
+    return Response.json({ ok: true, archived: activeTopics.results.length });
+  }
+
   if (action === "claim_topic") {
     const topicId = String(data.topic_id ?? "");
     const accountId = String(data.account_id ?? "");
     if (!topicId || !accountId) return Response.json({ error: "请选择选题和账号" }, { status: 400 });
+    const source = await db.prepare(`SELECT s.feed_id,s.processing_status,s.detail_text FROM topics t
+      LEFT JOIN topic_insights i ON i.topic_id=t.id LEFT JOIN trend_samples s ON s.feed_id=json_extract(i.source_feed_ids,'$[0]')
+      WHERE t.id=?`).bind(topicId).first<{ feed_id: string | null; processing_status: string | null; detail_text: string | null }>();
+    if (source?.feed_id && (source.processing_status !== "success" || !source.detail_text)) {
+      return Response.json({ error: "这个自动选题的来源正文尚未验证，暂时不能认领创作" }, { status: 409 });
+    }
     const existing = await db.prepare("SELECT id FROM claims WHERE topic_id=? AND account_id=? AND status NOT IN ('published','archived')").bind(topicId, accountId).first();
     if (existing) return Response.json({ error: "该选题已被这个账号认领" }, { status: 409 });
     const id = crypto.randomUUID();
@@ -128,7 +165,6 @@ export async function POST(request: Request) {
     const id = String(data.id ?? "");
     const claim = await db.prepare("SELECT owner_id,status FROM claims WHERE id=?").bind(id).first<{ owner_id: string; status: string }>();
     if (!claim) return Response.json({ error: "内容任务不存在" }, { status: 404 });
-    if (claim.owner_id !== user.id && !JSON.parse(user.roles).includes("admin")) return Response.json({ error: "只有负责人可以编辑" }, { status: 403 });
     const tags = Array.isArray(data.tags) ? data.tags : String(data.tags ?? "").split(/[，,\s]+/).filter(Boolean);
     await db.prepare("UPDATE claims SET title=?,body=?,tags=?,status=CASE WHEN status='revision' THEN 'writing' ELSE status END,updated_at=? WHERE id=?")
       .bind(String(data.title ?? "").trim(), String(data.body ?? "").trim(), JSON.stringify(tags), now, id).run();
@@ -141,7 +177,6 @@ export async function POST(request: Request) {
     const claim = await db.prepare("SELECT owner_id,title,body FROM claims WHERE id=?").bind(id).first<{ owner_id: string; title: string; body: string }>();
     if (!claim) return Response.json({ error: "内容任务不存在" }, { status: 404 });
     if (!claim.title.trim() || !claim.body.trim()) return Response.json({ error: "标题和正文填写完整后才能提交" }, { status: 400 });
-    if (claim.owner_id !== user.id && !JSON.parse(user.roles).includes("admin")) return Response.json({ error: "只有负责人可以提交" }, { status: 403 });
     await db.prepare("UPDATE claims SET status='review',review_comment='',updated_at=? WHERE id=?").bind(now, id).run();
     await audit(user.id, "提交审核", "claim", id);
     return Response.json({ ok: true });

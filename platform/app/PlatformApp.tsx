@@ -1,18 +1,18 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 type User = { id: string; name: string; username: string; roles: string[] };
 type Account = { id: string; name: string; status: string; color: string; queue_count: number; xhs_user_id?: string; xhs_nickname?: string; xhs_red_id?: string; profile_bio?: string; avatar_url?: string; following_count?: string; followers_count?: string; interaction_count?: string; note_count?: number; profile_synced_at?: string };
-type Topic = { id: string; title: string; source_url: string; relevance: string; status: string; creator_name: string; created_at: string; brief?: string; target_audience?: string; pain_point?: string; hook_points?: string[]; content_structure?: string[]; why_it_works?: string; account_fit?: string; source_feed_ids?: string[]; score?: number; source_author?: string; source_keyword?: string; liked_count?: string; collected_count?: string; comment_count?: string; heat_score?: number; captured_at?: string; note_published_at?: string; note_id?: string; claim_status?: string; claim_owner_name?: string };
+type Topic = { id: string; title: string; source_url: string; relevance: string; status: string; creator_name: string; created_at: string; brief?: string; target_audience?: string; pain_point?: string; hook_points?: string[]; content_structure?: string[]; why_it_works?: string; account_fit?: string; source_feed_ids?: string[]; score?: number; source_author?: string; source_keyword?: string; liked_count?: string; collected_count?: string; comment_count?: string; heat_score?: number; captured_at?: string; note_published_at?: string; note_id?: string; source_processing_status?: string; source_detail_verified?: number; claim_status?: string; claim_owner_name?: string };
 type ImagePrompt = { label: string; prompt: string };
 type CreativeDraft = { title_options: string[]; title: string; body: string; tags: string[]; image_prompts: ImagePrompt[]; creative_note: string };
 type CreativeVersion = { id: string; version_number: number; source: string; title: string; created_at: string };
-type Claim = { id: string; topic_id: string; topic_title: string; account_id: string; account_name: string; account_color: string; owner_id: string; owner_name: string; angle: string; status: string; status_label: string; title: string; body: string; tags: string[]; review_comment: string; updated_at: string; creative?: Partial<CreativeDraft>; creation_status?: string; creation_error?: string; version_number?: number; generated_at?: string; publish_images?: string[]; publish_error?: string; published_at?: string; publish_snapshot?: { title?: string; body?: string; tags?: string[]; approved_at?: string } | null };
+type Claim = { id: string; topic_id: string; topic_title: string; account_id: string; account_name: string; account_color: string; owner_id: string; owner_name: string; angle: string; status: string; status_label: string; title: string; body: string; tags: string[]; review_comment: string; updated_at: string; creative?: Partial<CreativeDraft>; creation_status?: string; creation_error?: string; version_number?: number; generated_at?: string; publish_images?: string[]; publish_error?: string; published_at?: string; publisher_id?: string; publisher_name?: string; publish_snapshot?: { title?: string; body?: string; tags?: string[]; approved_at?: string } | null };
 type Log = { id: string; actor_name: string; action: string; object_type: string; detail: string; created_at: string };
 type AppData = { user: User; accounts: Account[]; topics: Topic[]; claims: Claim[]; logs: Log[]; users: User[] };
 type TrendSettings = { account_id?: string; keywords: string[]; exclude_keywords: string[]; publish_time: string; sort_by: string; content_type?: "image" | "video" | "all"; last_scanned_at?: string; next_allowed_at?: string };
-type TrendSample = { id: string; feed_id: string; keyword: string; title: string; author_name: string; note_type: string; cover_url: string; source_url: string; liked_count: string; collected_count: string; comment_count: string; heat_score: number; published_at?: string; status: string; last_seen_at: string };
+type TrendSample = { id: string; feed_id: string; keyword: string; matched_keywords: string[]; title: string; author_name: string; note_type: string; source_url: string; cover_url: string; detail_text: string; original_tags: string[]; content_summary: string; sample_hooks: string[]; title_hook: string; visual_highlight: string; sample_pain_point: string; emotion_pain: string; practical_value: string; controversy_point: string; sample_structure: string[]; reusable_directions: string[]; account_adaptation: string; relevance_score: number; information_density_score: number; remix_value_score: number; selection_reason: string; liked_count: string; collected_count: string; comment_count: string; shared_count: string; raw_heat_score: number; heat_score: number; published_at?: string; selection_status: string; processing_status: string; capture_outcome: string; detail_error: string; status: string; first_seen_at: string; last_seen_at: string };
 type TrendScan = { id: string; keywords: string[]; completed_keywords: string[]; status: string; result_count: number; error: string; started_at: string; completed_at?: string };
 type TrendData = { settings: TrendSettings; samples: TrendSample[]; scans: TrendScan[]; accounts: Account[] };
 
@@ -21,8 +21,28 @@ const navItems = [
   ["review", "✓", "审核中心"], ["publish", "↗", "发布列表"], ["accounts", "◎", "账号中心"], ["logs", "≡", "日志中心"], ["settings", "⚙", "系统设置"],
 ];
 
+const navGroups = [
+  { label: "内容运营", ids: ["dashboard", "trends", "topics", "content"] },
+  { label: "审核发布", ids: ["review", "publish"] },
+  { label: "平台管理", ids: ["accounts", "logs", "settings"] },
+];
+
+const viewDescriptions: Record<string, string> = {
+  dashboard: "查看团队今天需要推进的内容和账号状态",
+  trends: "从真实高表现帖子中持续沉淀团队选题",
+  topics: "统一管理选题来源、拆解结果和认领进度",
+  content: "按账号查看已认领内容并完成 AI 创作",
+  review: "集中处理待审核内容并保留审核记录",
+  publish: "确认账号、人员和素材后执行真实发布",
+  accounts: "管理团队正在使用的小红书账号",
+  logs: "查看关键操作和平台运行记录",
+  settings: "管理成员权限与本机运行参数",
+};
+
 const accountStatus: Record<string, string> = { online: "在线", busy: "发布中", login_expired: "登录失效", unknown: "状态未知", paused: "已暂停", error: "异常" };
 const claimStatus: Record<string, string> = { writing: "创作中", review: "待审核", revision: "待修改", approved: "待发布", queued: "发布队列", publishing: "发布中", published: "已发布", failed: "发布失败" };
+const sampleProcessingStatus: Record<string, string> = { pending: "等待处理", detail_fetching: "正在获取详情", success: "成功", skipped: "跳过", detail_failed: "详情获取失败" };
+const sampleCaptureOutcome: Record<string, string> = { new: "新发现", duplicate: "已存在/重复" };
 
 async function jsonRequest(url: string, options?: RequestInit) {
   const response = await fetch(url, options);
@@ -65,7 +85,7 @@ export default function PlatformApp() {
   const loadAuth = useCallback(async () => setAuth(await jsonRequest("/api/auth")), []);
   const loadData = useCallback(async () => setData(await jsonRequest("/api/app")), []);
   useEffect(() => { fetch("/api/auth").then((response) => response.json()).then(setAuth).catch((error) => setMessage(error.message)); }, []);
-  useEffect(() => { if (auth?.user) fetch("/api/app").then((response) => response.json()).then(setData).catch((error) => setMessage(error.message)); }, [auth]);
+  useEffect(() => { if (auth?.user) jsonRequest("/api/app").then(setData).catch((error) => { setData(null); setMessage(error instanceof Error ? error.message : "无法读取团队工作区"); }); }, [auth]);
 
   async function authSubmit(event: FormEvent<HTMLFormElement>, action: "setup" | "login") {
     event.preventDefault(); setBusy(true); setMessage("");
@@ -100,32 +120,37 @@ export default function PlatformApp() {
   const pendingPublish = data.claims.filter((claim) => ["approved", "queued", "publishing", "failed"].includes(claim.status)).length;
   const unclaimed = data.topics.filter((topic) => topic.status === "unclaimed").length;
   const currentLabel = navItems.find(([id]) => id === view)?.[2];
+  const messageStartsWithSuccess = /^(已|正文补抓与拆解完成|内容已)/.test(message);
+  const messageHasWarning = messageStartsWithSuccess && /(不可用|仍需|已保留|跳过|超时)/.test(message);
+  const messageHasError = !messageStartsWithSuccess && /(失败|不能|没有|无法|错误|中断)/.test(message);
 
   return (
     <main className="app-shell">
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">红</span><div><strong>红薯台</strong><small>内容运营中台</small></div></div>
         <nav aria-label="主要导航">
-          {navItems.map(([id, icon, label]) => <button key={id} className={`nav-item ${view === id ? "active" : ""}`} onClick={() => setView(id)}><span>{icon}</span>{label}{id === "topics" && unclaimed > 0 ? <b>{unclaimed}</b> : null}{id === "review" && pendingReview > 0 ? <b>{pendingReview}</b> : null}{id === "publish" && pendingPublish > 0 ? <b>{pendingPublish}</b> : null}</button>)}
+          {navGroups.map((group) => <div className="nav-group" key={group.label}><span className="nav-group-label">{group.label}</span>{group.ids.map((id) => { const item = navItems.find(([itemId]) => itemId === id); if (!item) return null; const [, icon, label] = item; return <button key={id} className={`nav-item ${view === id ? "active" : ""}`} onClick={() => setView(id)}><span>{icon}</span>{label}{id === "topics" && unclaimed > 0 ? <b>{unclaimed}</b> : null}{id === "review" && pendingReview > 0 ? <b>{pendingReview}</b> : null}{id === "publish" && pendingPublish > 0 ? <b>{pendingPublish}</b> : null}</button>; })}</div>)}
         </nav>
         <div className="sidebar-bottom"><div className="profile"><div className="avatar">{data.user.name.slice(0, 1)}</div><div><strong>{data.user.name}</strong><small>{roleLabel(data.user.roles)}</small></div><button onClick={logout}>退出</button></div></div>
       </aside>
-      <section className="workspace">
-        <header className="topbar"><div><p className="eyebrow">{new Intl.DateTimeFormat("zh-CN", { dateStyle: "full" }).format(new Date())}</p><h1>{view === "dashboard" ? `下午好，${data.user.name}` : currentLabel}</h1></div><button className="primary" onClick={() => setView("topics")}>＋ 新建选题</button></header>
-        {message ? <div className={`toast ${message.includes("失败") || message.includes("不能") || message.includes("没有") ? "bad" : ""}`}><span>{message}</span><button onClick={() => setMessage("")}>×</button></div> : null}
-        {view === "dashboard" && <Dashboard data={data} setView={setView} />}
-        <div className="persistent-view" hidden={view !== "trends"} aria-hidden={view !== "trends"}>
-          <Trends reloadApp={loadData} notify={setMessage} />
+      <section className={`workspace view-${view}`}>
+        <header className="topbar"><div className="topbar-copy"><h1>{view === "dashboard" ? `下午好，${data.user.name}` : currentLabel}</h1><p className="page-description">{viewDescriptions[view]}</p></div><div className="topbar-actions"><span className="workspace-date">{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date())}</span><button className="primary" onClick={() => setView("topics")}>新建选题</button></div></header>
+        {message ? <div className={`toast ${messageHasError ? "bad" : messageHasWarning ? "warn" : ""}`}><span>{message}</span><button onClick={() => setMessage("")}>×</button></div> : null}
+        <div className="workspace-content">
+          {view === "dashboard" && <Dashboard data={data} setView={setView} />}
+          <div className="persistent-view" hidden={view !== "trends"} aria-hidden={view !== "trends"}>
+            <Trends reloadApp={loadData} notify={setMessage} />
+          </div>
+          {view === "topics" && <Topics data={data} action={action} busy={busy} />}
+          <div className="persistent-view" hidden={view !== "content"} aria-hidden={view !== "content"}>
+            <Content data={data} action={action} busy={busy} reload={loadData} notify={setMessage} />
+          </div>
+          {view === "review" && <Review data={data} action={action} busy={busy} />}
+          {view === "publish" && <Publish data={data} reload={loadData} notify={setMessage} />}
+          {view === "accounts" && <Accounts data={data} action={action} busy={busy} reload={loadData} notify={setMessage} />}
+          {view === "logs" && <Logs data={data} />}
+          {view === "settings" && <Settings data={data} action={action} busy={busy} />}
         </div>
-        {view === "topics" && <Topics data={data} action={action} busy={busy} />}
-        <div className="persistent-view" hidden={view !== "content"} aria-hidden={view !== "content"}>
-          <Content data={data} action={action} busy={busy} reload={loadData} notify={setMessage} />
-        </div>
-        {view === "review" && <Review data={data} action={action} busy={busy} />}
-        {view === "publish" && <Publish data={data} reload={loadData} notify={setMessage} />}
-        {view === "accounts" && <Accounts data={data} action={action} busy={busy} reload={loadData} notify={setMessage} />}
-        {view === "logs" && <Logs data={data} />}
-        {view === "settings" && <Settings data={data} action={action} busy={busy} />}
       </section>
     </main>
   );
@@ -133,7 +158,7 @@ export default function PlatformApp() {
 
 function AuthPage({ mode, onSubmit, busy, message }: { mode: "setup" | "login"; onSubmit: (event: FormEvent<HTMLFormElement>, mode: "setup" | "login") => void; busy: boolean; message: string }) {
   const setup = mode === "setup";
-  return <main className="auth-page"><section className="auth-intro"><div className="brand inverse"><span className="brand-mark">红</span><div><strong>红薯台</strong><small>内容运营中台</small></div></div><div><span className="pill">本机部署 · 团队专用</span><h1>把选题、创作、审核和发布，<br />放进一个清晰的工作台。</h1><p>数据留在你的 Mac mini，团队成员使用独立账号协作。</p></div><small>零新增软件费用 · AI 创作图文稿</small></section><section className="auth-form-wrap"><form className="auth-form" onSubmit={(event) => onSubmit(event, mode)}><span className="auth-kicker">{setup ? "首次启动" : "欢迎回来"}</span><h2>{setup ? "创建管理员账号" : "登录团队工作区"}</h2><p>{setup ? "这位管理员可以继续添加成员和分配权限。" : "使用管理员为你创建的用户名和密码。"}</p>{setup ? <label>姓名<input name="name" required placeholder="例如：万勇龙" autoComplete="name" /></label> : null}<label>用户名<input name="username" required placeholder="3–24位字母或数字" autoComplete="username" /></label><label>密码<input name="password" required minLength={8} type="password" placeholder="至少8位" autoComplete={setup ? "new-password" : "current-password"} /></label>{message ? <div className="form-error">{message}</div> : null}<button className="primary auth-submit" disabled={busy}>{busy ? "请稍候…" : setup ? "创建并进入平台" : "登录"}</button><small>账号密码仅保存在本机数据库中，不使用飞书或小红书登录。</small></form></section></main>;
+  return <main className="auth-page"><section className="auth-intro"><div className="brand inverse"><span className="brand-mark">红</span><div><strong>红薯台</strong><small>内容运营中台</small></div></div><div><span className="pill">本机部署 · 团队专用</span><h1>把选题、创作、审核和发布，<br />放进一个清晰的工作台。</h1><p>数据留在你的 Mac mini，团队成员使用独立账号协作。</p></div><small>零新增软件费用 · AI 创作图文稿</small></section><section className="auth-form-wrap"><form className="auth-form" onSubmit={(event) => onSubmit(event, mode)}><span className="auth-kicker">{setup ? "首次启动" : "欢迎回来"}</span><h2>{setup ? "创建管理员账号" : "登录团队工作区"}</h2><p>{setup ? "这位管理员可以继续添加成员和分配权限。" : "使用管理员为你创建的用户名和密码。"}</p>{setup ? <label>姓名<input name="name" required placeholder="例如：万勇龙" autoComplete="name" /></label> : null}<label>用户名<input name="username" required placeholder="3-24位字母或数字" autoComplete="username" /></label><label>密码<input name="password" required minLength={8} type="password" placeholder="至少8位" autoComplete={setup ? "new-password" : "current-password"} /></label>{message ? <div className="form-error">{message}</div> : null}<button className="primary auth-submit" disabled={busy}>{busy ? "请稍候…" : setup ? "创建并进入平台" : "登录"}</button><small>账号密码仅保存在本机数据库中，不使用飞书或小红书登录。</small></form></section></main>;
 }
 
 function Dashboard({ data, setView }: { data: AppData; setView: (view: string) => void }) {
@@ -141,22 +166,31 @@ function Dashboard({ data, setView }: { data: AppData; setView: (view: string) =
   const mine = data.claims.filter((claim) => claim.owner_id === data.user.id && ["writing", "revision"].includes(claim.status)).length;
   const published = data.claims.filter((claim) => claim.status === "published").length;
   const visibleClaims = data.claims.slice(0, 5);
-  return <>
-    <div className="hero-grid"><article className="focus-card"><div><span className="pill">今日重点</span><h2>把好内容，稳稳地发出去。</h2><p>{mine ? `你有 ${mine} 篇内容需要继续处理。` : "当前没有待处理草稿，可以从选题中心认领新任务。"}</p><div className="focus-actions"><button className="light-button" onClick={() => setView(mine ? "content" : "topics")}>{mine ? "继续创作" : "寻找选题"}</button><span>团队任务 <strong>{data.claims.length}</strong></span></div></div><div className="progress-ring"><div><strong>{Math.min(100, published * 10)}%</strong><span>发布进度</span></div></div></article><article className="alert-card"><div className="alert-head"><span>账号提醒</span><b>!</b></div><h3>{data.accounts.length ? data.accounts.find((a) => a.status === "login_expired")?.name || "账号运行正常" : "尚未添加账号"}</h3><p>{!data.accounts.length ? "账号中心只展示你实际添加的小红书账号。" : data.accounts.some((a) => a.status === "login_expired") ? "登录状态已失效，相关发布任务将保持暂停。" : "所有账号连接状态正常。"}</p><button onClick={() => setView("accounts")}>{data.accounts.length ? "立即处理" : "添加账号"} →</button></article></div>
-    <section className="metrics"><Metric icon="⌁" tone="lavender" label="待认领选题" value={data.topics.filter((t) => t.status === "unclaimed").length} note="进入选题中心" /><Metric icon="✎" tone="blue" label="我的创作" value={mine} note="草稿自动保存" /><Metric icon="✓" tone="amber" label="等待审核" value={reviews} note="需审核员处理" /><Metric icon="↗" tone="mint" label="累计已发布" value={published} note="本机记录" /></section>
-    <div className="content-grid"><section className="panel task-panel"><div className="panel-head"><div><h2>内容任务</h2><p>团队最近更新的任务</p></div><button onClick={() => setView("content")}>查看全部</button></div>{visibleClaims.length ? <div className="task-list">{visibleClaims.map((claim) => <article className="task-row" key={claim.id}><div className={`status-dot ${toneFor(claim.status)}`}></div><div className="task-main"><h3>{claim.title || claim.topic_title}</h3><p><span>{claim.account_name}</span> · 负责人 {claim.owner_name}</p></div><span className={`status ${toneFor(claim.status)}`}>{claim.status_label}</span></article>)}</div> : <Empty title="还没有内容任务" text="创建选题并认领后，任务会出现在这里。" />}</section><section className="panel account-panel"><div className="panel-head"><div><h2>账号运行状态</h2><p>{data.accounts.length} 个账号 · 全局并发上限 2</p></div><button onClick={() => setView("accounts")}>管理</button></div><div className="account-list">{data.accounts.map((account) => <AccountRow key={account.id} account={account} />)}</div></section></div>
-  </>;
+  return <div className="dashboard-layout">
+    <section className="dashboard-main">
+      <article className="focus-card"><div><span className="pill">今日重点</span><h2>把好内容，稳稳地发出去。</h2><p>{mine ? `你有 ${mine} 篇内容需要继续处理。` : "当前没有待处理草稿，可以从选题中心认领新任务。"}</p><div className="focus-actions"><button className="light-button" onClick={() => setView(mine ? "content" : "topics")}>{mine ? "继续创作" : "寻找选题"}</button><span>团队任务 <strong>{data.claims.length}</strong></span></div></div><div className="progress-ring"><div><strong>{Math.min(100, published * 10)}%</strong><span>发布进度</span></div></div></article>
+      <section className="metrics"><Metric icon="⌁" tone="lavender" label="待认领选题" value={data.topics.filter((t) => t.status === "unclaimed").length} note="进入选题中心" /><Metric icon="✎" tone="blue" label="我的创作" value={mine} note="草稿自动保存" /><Metric icon="✓" tone="amber" label="等待审核" value={reviews} note="需审核员处理" /><Metric icon="↗" tone="mint" label="累计已发布" value={published} note="本机记录" /></section>
+      <section className="panel task-panel"><div className="panel-head"><div><h2>内容任务</h2><p>团队最近更新的任务</p></div><button onClick={() => setView("content")}>查看全部</button></div>{visibleClaims.length ? <div className="task-list">{visibleClaims.map((claim) => <article className="task-row" key={claim.id}><div className={`status-dot ${toneFor(claim.status)}`}></div><div className="task-main"><h3>{claim.title || claim.topic_title}</h3><p><span>{claim.account_name}</span> · 负责人 {claim.owner_name}</p></div><span className={`status ${toneFor(claim.status)}`}>{claim.status_label}</span></article>)}</div> : <Empty title="还没有内容任务" text="创建选题并认领后，任务会出现在这里。" />}</section>
+    </section>
+    <aside className="dashboard-rail">
+      <article className="alert-card"><div className="alert-head"><span>账号提醒</span><b>!</b></div><h3>{data.accounts.length ? data.accounts.find((a) => a.status === "login_expired")?.name || "账号运行正常" : "尚未添加账号"}</h3><p>{!data.accounts.length ? "账号中心只展示你实际添加的小红书账号。" : data.accounts.some((a) => a.status === "login_expired") ? "登录状态已失效，相关发布任务将保持暂停。" : "所有账号连接状态正常。"}</p><button onClick={() => setView("accounts")}>{data.accounts.length ? "立即处理" : "添加账号"} →</button></article>
+      <section className="panel account-panel"><div className="panel-head"><div><h2>账号运行状态</h2><p>{data.accounts.length} 个账号 · 全局并发上限 2</p></div><button onClick={() => setView("accounts")}>管理</button></div><div className="account-list">{data.accounts.map((account) => <AccountRow key={account.id} account={account} />)}</div></section>
+    </aside>
+  </div>;
 }
 
 function Trends({ reloadApp, notify }: { reloadApp: () => Promise<void>; notify: (message: string) => void }) {
   const [data, setData] = useState<TrendData | null>(null);
   const [scanning, setScanning] = useState("");
-  const [filter, setFilter] = useState("new");
+  const [filter, setFilter] = useState("selected");
   const [selectedSamples, setSelectedSamples] = useState<string[]>([]);
   const [batchBusy, setBatchBusy] = useState(false);
   const [topicSample, setTopicSample] = useState<TrendSample | null>(null);
   const [topicTitle, setTopicTitle] = useState("");
   const [requestText, setRequestText] = useState("");
+  const taskAbortRef = useRef<AbortController | null>(null);
+  const activeScanRef = useRef("");
+  const [stoppingTask, setStoppingTask] = useState(false);
 
   const load = useCallback(async () => {
     const result = await jsonRequest("/api/trends") as TrendData;
@@ -169,36 +203,94 @@ function Trends({ reloadApp, notify }: { reloadApp: () => Promise<void>; notify:
 
   async function startScan() {
     if (!requestText.trim()) { notify("请先用一句话描述你想找什么选题"); return; }
+    const controller = new AbortController();
+    taskAbortRef.current = controller;
     let stage = "1/5 AI 正在理解你的需求";
     setScanning(stage); notify("");
     try {
-      const plan = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "plan_request", request_text: requestText }) });
+      const plan = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify({ action: "plan_request", request_text: requestText }) });
       stage = `2/5 已理解：${plan.intent_summary}，正在分配主账号 MCP`;
       setScanning(stage);
-      const begin = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "begin_scan", request_text: requestText, theme: plan.theme }) });
+      const begin = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify({ action: "begin_scan", request_text: requestText, theme: plan.theme }) });
+      activeScanRef.current = String(begin.scan_id || "");
       if (begin.reused) {
+        const resumeWarnings: string[] = [];
+        const pendingDetailIds = Array.isArray(begin.detail_sample_ids) ? begin.detail_sample_ids as string[] : [];
+        for (let index = 0; index < pendingDetailIds.length; index += 1) {
+          stage = `4/5 正在补抓上次未完成的正文 ${index + 1}/${pendingDetailIds.length}`; setScanning(stage);
+          const enriched = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify({ action: "enrich_sample", scan_id: begin.scan_id, sample_id: pendingDetailIds[index] }) });
+          if (enriched.warning) resumeWarnings.push(enriched.warning);
+          await load();
+        }
         if (begin.needs_analysis && begin.scan_id) {
-          stage = "5/5 继续用 AI 整理上次已经采集的样本"; setScanning(stage);
-          const resumed = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "analyze_scan", scan_id: begin.scan_id }) });
-          await Promise.all([load(), reloadApp()]); notify(`已从上次样本整理出 ${resumed.created} 个可领取选题`); return;
+          stage = "最后一步：采集与正文读取已完成，AI 正在拆解并生成原创选题（最长约 5 分钟）"; setScanning(stage);
+          const resumed = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify({ action: "analyze_scan", scan_id: begin.scan_id }) });
+          await Promise.all([load(), reloadApp()]); notify(`已从正文成功的样本整理出 ${resumed.created} 个可领取选题${resumeWarnings.length ? `；${resumeWarnings.join("；")}` : ""}`); return;
         }
         notify(`${begin.message}，下次可更新：${dateTime(begin.next_allowed_at)}`); await load(); return;
       }
       const words = begin.keywords as string[];
       const scanWarnings: string[] = [];
       for (let index = 0; index < words.length; index += 1) {
-        stage = `3/5 MCP 正在抓取 ${index + 1}/${words.length}：${words[index]}`; setScanning(stage);
-        const scanned = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "scan_keyword", scan_id: begin.scan_id, keyword: words[index] }) });
+        stage = `3/5 正在搜索基础样本 ${index + 1}/${words.length}：${words[index]}`; setScanning(stage);
+        const scanned = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify({ action: "scan_keyword", scan_id: begin.scan_id, keyword: words[index] }) });
         if (scanned.warning) scanWarnings.push(`${words[index]}：${scanned.warning}`);
+        await load();
       }
-      stage = "4/5 正在去重样本并计算热度"; setScanning(stage);
-      await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "finish_scan", scan_id: begin.scan_id }) });
-      stage = "5/5 AI 正在聚类、拆解爆点并生成原创选题"; setScanning(stage);
-      const analysis = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "analyze_scan", scan_id: begin.scan_id }) });
+      stage = "4/5 基础样本已入库，正在计算热度"; setScanning(stage);
+      const finished = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify({ action: "finish_scan", scan_id: begin.scan_id }) });
+      await load();
+      const detailSampleIds = Array.isArray(finished.detail_sample_ids) ? finished.detail_sample_ids as string[] : [];
+      for (let index = 0; index < detailSampleIds.length; index += 1) {
+        stage = `4/5 已从 ${finished.candidate_count || 0} 条候选选出 ${finished.selected_count || detailSampleIds.length} 条，正在补充详情 ${index + 1}/${detailSampleIds.length}`; setScanning(stage);
+        const enriched = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify({ action: "enrich_sample", scan_id: begin.scan_id, sample_id: detailSampleIds[index] }) });
+        if (enriched.warning) scanWarnings.push(enriched.warning);
+        await load();
+      }
+      stage = "最后一步：采集与正文读取已完成，AI 正在聚类、拆解爆点并生成原创选题（最长约 5 分钟）"; setScanning(stage);
+      const analysis = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify({ action: "analyze_scan", scan_id: begin.scan_id }) });
       await Promise.all([load(), reloadApp()]);
-      notify(`已自动整理出 ${analysis.created} 个可领取选题${scanWarnings.length ? `；${scanWarnings.join("；")}` : ""}`);
-    } catch (error) { notify(`${stage}失败：${error instanceof Error ? error.message : "采集任务中断"}`); await load().catch(() => undefined); }
-    finally { setScanning(""); }
+      notify(`已自动整理出 ${analysis.created} 个可领取选题${scanWarnings.length ? `。补充说明：${scanWarnings.join("；")}` : ""}`);
+    } catch (error) { if (!controller.signal.aborted) notify(`${stage}失败：${error instanceof Error ? error.message : "采集任务中断"}`); await load().catch(() => undefined); }
+    finally { if (taskAbortRef.current === controller) taskAbortRef.current = null; activeScanRef.current = ""; setScanning(""); }
+  }
+
+  async function resumePendingDetails() {
+    if (!window.confirm("将使用主采集账号补抓所有待处理正文，并在完成后运行 AI 拆解。任务可能需要几分钟，切换到其他页面后仍会继续。是否开始？")) return;
+    const controller = new AbortController();
+    taskAbortRef.current = controller;
+    let stage = "正在读取待补抓样本";
+    setScanning(stage); notify("");
+    try {
+      const resume = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify({ action: "resume_details", confirmed: true, origin: "manual_backfill_button" }) });
+      activeScanRef.current = String(resume.scan_id || "");
+      const ids = Array.isArray(resume.detail_sample_ids) ? resume.detail_sample_ids as string[] : [];
+      if (!ids.length) { notify("当前没有等待补抓的入选样本"); await load(); return; }
+      const warnings: string[] = [];
+      for (let index = 0; index < ids.length; index += 1) {
+        stage = `正在补抓正文 ${index + 1}/${ids.length}`; setScanning(stage);
+        const result = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify({ action: "enrich_sample", scan_id: resume.scan_id, sample_id: ids[index] }) });
+        if (result.warning) warnings.push(result.warning);
+        await load();
+      }
+      stage = "正文补抓已完成，AI 正在生成完整爆款档案（最长约 5 分钟）"; setScanning(stage);
+      const analysis = await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify({ action: "analyze_scan", scan_id: resume.scan_id }) });
+      await Promise.all([load(), reloadApp()]);
+      notify(`正文补抓与拆解完成，已生成 ${analysis.created ?? 0} 个原创选题${warnings.length ? `；${warnings.length} 条正文仍需稍后重试` : ""}`);
+    } catch (error) { if (!controller.signal.aborted) notify(`${stage}失败：${error instanceof Error ? error.message : "任务中断"}`); await load().catch(() => undefined); }
+    finally { if (taskAbortRef.current === controller) taskAbortRef.current = null; activeScanRef.current = ""; setScanning(""); }
+  }
+
+  async function stopTrendTask() {
+    if (!scanning || stoppingTask) return;
+    setStoppingTask(true);
+    const scanId = activeScanRef.current;
+    taskAbortRef.current?.abort();
+    try {
+      await jsonRequest("/api/trends", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "cancel_scan", scan_id: scanId }) });
+      notify("爆款研究任务已停止，未完成正文已恢复为可重试状态");
+    } catch (error) { notify(error instanceof Error ? error.message : "停止任务失败"); }
+    finally { activeScanRef.current = ""; setScanning(""); setStoppingTask(false); await load().catch(() => undefined); }
   }
 
   async function sampleAction(action: "archive_sample" | "create_topic", sample: TrendSample, title = "") {
@@ -212,7 +304,7 @@ function Trends({ reloadApp, notify }: { reloadApp: () => Promise<void>; notify:
   }
 
   async function createTopicsInBatch() {
-    const sampleIds = selectedSamples.filter((id) => data?.samples.some((sample) => sample.id === id && sample.status === "new"));
+    const sampleIds = selectedSamples.filter((id) => data?.samples.some((sample) => sample.id === id && sample.status === "new" && sample.selection_status === "selected" && sample.processing_status === "success" && sample.detail_text && sample.content_summary));
     if (!sampleIds.length) return;
     setBatchBusy(true);
     try {
@@ -246,26 +338,47 @@ function Trends({ reloadApp, notify }: { reloadApp: () => Promise<void>; notify:
 
   if (!data) return <section className="panel"><Empty title="正在读取高表现样本" text="首次进入会初始化本机选题采集设置。" /></section>;
   const selectedAccount = data.accounts.find((account) => account.id === data.settings?.account_id);
-  const visible = data.samples.filter((sample) => filter === "all" ? sample.status !== "archived" : sample.status === filter);
+  const canTransferSample = (sample: TrendSample) => sample.status === "new" && sample.selection_status === "selected" && sample.processing_status === "success" && Boolean(sample.detail_text && sample.content_summary);
+  const visible = data.samples.filter((sample) => {
+    if (sample.status === "archived") return false;
+    if (filter === "selected") return sample.selection_status === "selected" && sample.status === "new";
+    if (filter === "processing") return ["pending", "detail_fetching"].includes(sample.processing_status);
+    if (filter === "exceptions") return ["detail_failed", "skipped"].includes(sample.processing_status);
+    if (filter === "used") return sample.status === "used";
+    return true;
+  });
   const selectable = visible;
-  const transferableCount = selectedSamples.filter((id) => data.samples.some((sample) => sample.id === id && sample.status === "new")).length;
+  const transferableCount = selectedSamples.filter((id) => data.samples.some((sample) => sample.id === id && canTransferSample(sample))).length;
+  const alreadyTransferredCount = selectedSamples.filter((id) => data.samples.some((sample) => sample.id === id && sample.status === "used")).length;
+  const unavailableTransferCount = Math.max(0, selectedSamples.length - transferableCount - alreadyTransferredCount);
   const allVisibleSelected = Boolean(selectable.length) && selectable.every((sample) => selectedSamples.includes(sample.id));
+  const detailedCount = data.samples.filter((sample) => sample.detail_text).length;
+  const analyzedCount = data.samples.filter((sample) => sample.content_summary).length;
+  const pendingSelectedCount = data.samples.filter((sample) => sample.selection_status === "selected" && ["pending", "detail_failed"].includes(sample.processing_status) && !sample.detail_text).length;
+  const isDetailBackfill = Boolean(scanning && (scanning.includes("补抓") || scanning.includes("爆款档案")));
+  const isAiAnalysis = Boolean(scanning && scanning.includes("AI 正在"));
   return <div className="page-stack trend-page">
-    <section className="trend-hero"><div className="trend-command-copy"><span className="pill">一句话生成选题库</span><h2>告诉我想找什么，剩下的自动完成。</h2><p>系统会理解时间和主题，由唯一主账号搜索真实帖子，再用 AI 拆解关键信息、用户痛点、爆点与内容结构，自动放进团队选题库。切换到其他页面不会停止当前任务。</p><div className="trend-command"><input value={requestText} onChange={(event) => setRequestText(event.target.value)} aria-describedby="trend-submit-hint" placeholder="例如：最近一周最火的AI相关帖子，整理成适合团队领取的选题" /><button className="light-button" disabled={Boolean(scanning) || !data.settings?.account_id || !requestText.trim()} onClick={startScan}>{scanning ? "任务执行中…" : "开始自动采集并整理"}</button></div><small id="trend-submit-hint" className="trend-submit-hint">输入完成后请点击按钮开始；按回车不会提交任务。</small>{scanning ? <div className="workflow-progress"><i></i><span>{scanning}</span></div> : null}</div><div className="trend-hero-action"><small>{selectedAccount ? `主账号：${selectedAccount.xhs_nickname || selectedAccount.name}` : "尚未设置主账号"}</small><strong>{data.samples.length}</strong><span>已积累真实样本</span>{data.settings?.last_scanned_at ? <time>上次采集 {dateTime(data.settings.last_scanned_at)}</time> : <time>尚未进行首次采集</time>}</div></section>
+    <section className="trend-hero"><div className="trend-command-copy"><span className="pill">爆款研究任务</span><h2>用一句话建立可写的选题参考。</h2><p>先展示标题、作者与互动数据，再按热度补充正文，最后整理摘要、痛点、爆点与内容结构。</p><div className="trend-command"><input value={requestText} onChange={(event) => setRequestText(event.target.value)} aria-describedby="trend-submit-hint" placeholder="例如：最近一周高互动的AI效率工具图文，整理成团队选题" /><button className="light-button" disabled={Boolean(scanning) || !data.settings?.account_id || !requestText.trim()} onClick={startScan}>{scanning ? isAiAnalysis ? "AI 分析中…" : isDetailBackfill ? "补抓处理中…" : "正在采集…" : "开始采集并拆解"}</button>{scanning ? <button className="stop-task-button" disabled={stoppingTask} onClick={stopTrendTask}>{stoppingTask ? "正在停止…" : "停止任务"}</button> : null}</div><small id="trend-submit-hint" className="trend-submit-hint">采集与补抓只会在你点击对应按钮并确认后开始；切换平台页面不会停止已经开始的任务。</small>{scanning ? <div className="workflow-progress"><i></i><span>{isDetailBackfill ? `后台补抓任务：${scanning}` : scanning}</span></div> : null}</div><div className="trend-hero-action"><small>{selectedAccount ? `研究账号：${selectedAccount.xhs_nickname || selectedAccount.name}` : "尚未设置研究账号"}</small><div className="trend-research-stats"><span><strong>{data.samples.length}</strong><small>真实样本</small></span><span><strong>{detailedCount}</strong><small>已读正文</small></span><span><strong>{analyzedCount}</strong><small>已完成拆解</small></span></div>{data.settings?.last_scanned_at ? <time>上次更新 {dateTime(data.settings.last_scanned_at)}</time> : <time>尚未完成首次研究</time>}</div></section>
     <section className="panel trend-library">
-      <div className="panel-head"><div><h2>高表现样本库</h2><p>{data.samples.length} 条真实帖子记录 · 按帖子ID自动去重</p></div><div className="sample-tabs"><button className={filter === "new" ? "active" : ""} onClick={() => setFilter("new")}>待处理 {data.samples.filter((item) => item.status === "new").length}</button><button className={filter === "used" ? "active" : ""} onClick={() => setFilter("used")}>已转选题</button><button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>全部</button></div></div>
+      <div className="panel-head"><div><h2>爆款笔记研究库</h2><p>{data.samples.length} 条真实候选 · 扩大候选池后按热度筛选 · 笔记 ID 自动去重</p></div><div className="sample-tabs">{pendingSelectedCount ? <button className="retry-details" disabled={Boolean(scanning)} onClick={resumePendingDetails}>补抓正文 {pendingSelectedCount}</button> : null}<button className={filter === "selected" ? "active" : ""} onClick={() => { setFilter("selected"); setSelectedSamples([]); }}>入选待转入 {data.samples.filter((item) => item.selection_status === "selected" && item.status === "new").length}</button><button className={filter === "processing" ? "active" : ""} onClick={() => { setFilter("processing"); setSelectedSamples([]); }}>处理中</button><button className={filter === "exceptions" ? "active" : ""} onClick={() => { setFilter("exceptions"); setSelectedSamples([]); }}>失败/跳过</button><button className={filter === "used" ? "active" : ""} onClick={() => { setFilter("used"); setSelectedSamples([]); }}>已转选题 {data.samples.filter((item) => item.status === "used").length}</button><button className={filter === "all" ? "active" : ""} onClick={() => { setFilter("all"); setSelectedSamples([]); }}>全部</button></div></div>
       {selectable.length ? <div className="sample-batch-bar">
         <label><input type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedSamples(allVisibleSelected ? selectedSamples.filter((id) => !selectable.some((sample) => sample.id === id)) : Array.from(new Set([...selectedSamples, ...selectable.map((sample) => sample.id)])))} />全选当前列表</label>
-        <span>已选择 {selectedSamples.length} 条</span>
+        <span>已选择 {selectedSamples.length} 条 · 可转入 {transferableCount} 条{alreadyTransferredCount ? ` · 已转入 ${alreadyTransferredCount} 条` : ""}{unavailableTransferCount ? ` · 暂不可转 ${unavailableTransferCount} 条` : ""}</span>
         <button className="ghost" disabled={!selectedSamples.length || batchBusy} onClick={() => setSelectedSamples([])}>清空</button>
         <button className="danger-outline" disabled={!selectedSamples.length || batchBusy} onClick={deleteSamplesInBatch}>{batchBusy ? "正在处理…" : `批量删除${selectedSamples.length ? `（${selectedSamples.length}）` : ""}`}</button>
-        <button className="primary" disabled={!transferableCount || batchBusy} onClick={createTopicsInBatch}>{batchBusy ? "正在处理…" : `批量转入选题中心${transferableCount ? `（${transferableCount}）` : ""}`}</button>
+        <button className="primary" disabled={!transferableCount || batchBusy} onClick={createTopicsInBatch}>{batchBusy ? "正在处理…" : `批量转入选题中心（可转 ${transferableCount}）`}</button>
       </div> : null}
-      {visible.length ? <div className="sample-grid">{visible.map((sample) => <article className={`sample-card ${selectedSamples.includes(sample.id) ? "selected" : ""}`} key={sample.id}>
-        <label className="sample-selector" aria-label={`选择 ${sample.title}`}><input type="checkbox" checked={selectedSamples.includes(sample.id)} onChange={() => setSelectedSamples((current) => current.includes(sample.id) ? current.filter((id) => id !== sample.id) : [...current, sample.id])} /><span>选择</span></label>
-        <a className="sample-cover" href={sample.source_url} target="_blank" rel="noreferrer" style={sample.cover_url ? { backgroundImage: `url(${sample.cover_url})` } : undefined}><span>{sample.note_type === "video" ? "视频" : "图文"}</span></a>
-        <div className="sample-content"><span className="sample-keyword">#{sample.keyword} · 热度 {sample.heat_score || "待计算"}</span><h3>{sample.title}</h3><p>{sample.author_name || "作者信息未显示"} · 采集于 {dateTime(sample.last_seen_at)}</p><div className="sample-metrics"><span>赞 <strong>{sample.liked_count}</strong></span><span>藏 <strong>{sample.collected_count}</strong></span><span>评 <strong>{sample.comment_count}</strong></span></div><div className="sample-actions"><button className="ghost" onClick={() => sampleAction("archive_sample", sample)}>忽略</button><button className="outline" disabled={sample.status === "used"} onClick={() => { setTopicSample(sample); setTopicTitle(""); }}>{sample.status === "used" ? "已进入选题库" : "转为原创选题"}</button></div></div>
-      </article>)}</div> : <Empty title={data.samples.length ? "这个分类暂无样本" : "还没有采集样本"} text={data.samples.length ? "可以切换上方分类查看其他样本。" : "在上方输入一句话，系统会自动完成首次采集。"} />}
+      {visible.length ? <div className="sample-research-list">{visible.map((sample) => <article className={`sample-research-row ${selectedSamples.includes(sample.id) ? "selected" : ""}`} key={sample.id}>
+        <label className="research-selector" aria-label={`选择 ${sample.title}`}><input type="checkbox" checked={selectedSamples.includes(sample.id)} onChange={() => setSelectedSamples((current) => current.includes(sample.id) ? current.filter((id) => id !== sample.id) : [...current, sample.id])} /></label>
+        <div className="research-score"><strong>{sample.heat_score || "--"}</strong><span>热度</span></div>
+        <div className="research-main">
+          <div className="research-title"><div><span>{sample.matched_keywords.length ? sample.matched_keywords.map((word) => `#${word}`).join(" · ") : `#${sample.keyword}`}</span><h3>{sample.title}</h3></div><div className="research-state-stack"><span className={`research-state ${sample.processing_status === "success" ? "ready" : "pending"}`}>{sampleProcessingStatus[sample.processing_status] || sample.processing_status}</span><small>{sampleCaptureOutcome[sample.capture_outcome] || sample.capture_outcome} · {sample.selection_status === "selected" ? "入选爆款" : "候选未入选"}</small></div></div>
+          <div className="research-source"><span>作者 <strong>{sample.author_name || "未知"}</strong></span><span>笔记ID <strong>{sample.feed_id}</strong></span><span>发布时间 <strong>{sample.published_at ? dateOnly(sample.published_at) : "详情未提供"}</strong></span><span>抓取时间 <strong>{dateTime(sample.last_seen_at)}</strong></span>{sample.original_tags.length ? <span>标签 <strong>{sample.original_tags.map((tag) => `#${tag}`).join(" ")}</strong></span> : null}<a href={sample.source_url} target="_blank" rel="noreferrer">查看原文链接</a></div>
+          <div className="research-insight"><div><span>内容摘要</span><p>{sample.processing_status === "success" ? sample.content_summary || "正文已读取，等待AI完成摘要与拆解。" : "正文尚未获取成功，只保留标题、作者和真实互动数据；旧AI推断已隐藏。"}</p></div><div><span>爆点拆解</span>{sample.processing_status === "success" && sample.sample_hooks.length ? <ul>{sample.sample_hooks.map((hook) => <li key={hook}>{hook}</li>)}</ul> : <p>{sample.processing_status === "success" ? "等待AI拆解" : "正文成功后才会拆解"}</p>}</div></div>
+          {sample.processing_status === "success" ? <details className="research-details"><summary>展开完整爆款档案</summary><div><section><span>标题钩子</span><p>{sample.title_hook || "等待拆解"}</p></section><section><span>视觉亮点</span><p>{sample.visual_highlight || (sample.cover_url ? "已保留封面依据，等待分析" : "未获取封面视觉内容，无法判断")}</p></section><section><span>情绪或痛点</span><p>{sample.emotion_pain || sample.sample_pain_point || "等待拆解"}</p></section><section><span>实用价值</span><p>{sample.practical_value || "等待拆解"}</p></section><section><span>争议与互动点</span><p>{sample.controversy_point || "等待拆解"}</p></section><section><span>内容结构</span><p>{sample.sample_structure.length ? sample.sample_structure.join(" → ") : "等待拆解"}</p></section><section><span>可复用选题方向</span><p>{sample.reusable_directions.length ? sample.reusable_directions.join(" · ") : "等待拆解"}</p></section><section><span>适合自身账号的原创转化</span><p>{sample.account_adaptation || "等待拆解"}</p></section><section><span>综合判断</span><p>{sample.selection_reason || "等待相关度与二创价值判断"}</p><small>行业相关 {sample.relevance_score || 0} · 信息密度 {sample.information_density_score || 0} · 二创价值 {sample.remix_value_score || 0}</small></section><section className="research-original"><span>原帖正文</span><p>{sample.detail_text}</p></section></div></details> : <div className="research-detail-blocked"><strong>完整爆款档案尚未生成</strong><span>{sample.detail_error || "正文等待补抓，成功后才会显示摘要、钩子、痛点和原创方向。"}</span></div>}
+        </div>
+        <aside className="research-side"><div><span>点赞<strong>{sample.liked_count}</strong></span><span>收藏<strong>{sample.collected_count}</strong></span><span>评论<strong>{sample.comment_count}</strong></span><span>分享<strong>{sample.shared_count || "未提供"}</strong></span><span>原始热度<strong>{Math.round(sample.raw_heat_score || 0)}</strong></span><span>标准分<strong>{sample.heat_score || "--"}</strong></span></div><button className="outline" disabled={sample.status === "used" || sample.selection_status !== "selected" || sample.processing_status !== "success" || !sample.detail_text || !sample.content_summary} onClick={() => { setTopicSample(sample); setTopicTitle(""); }}>{sample.status === "used" ? "已转入" : sample.selection_status !== "selected" ? "候选未入选" : sample.processing_status !== "success" || !sample.detail_text ? "正文成功后可转入" : !sample.content_summary ? "等待爆点拆解" : "转入选题中心"}</button><button className="ghost" onClick={() => sampleAction("archive_sample", sample)}>忽略</button></aside>
+      </article>)}</div> : <Empty title={data.samples.length ? "这个分类暂无样本" : "还没有研究样本"} text={data.samples.length ? "可以切换上方分类查看其他样本。" : "在上方输入研究需求，系统会搜索并拆解重点帖子。"} />}
     </section>
     {topicSample ? <div className="modal-backdrop"><form className="modal" onSubmit={(event) => { event.preventDefault(); sampleAction("create_topic", topicSample, topicTitle); }}><span className="section-kicker">从样本加入选题</span><h2>直接加入，或修改标题</h2><div className="source-sample"><small>参考样本</small><strong>{topicSample.title}</strong><span>#{topicSample.keyword} · 赞 {topicSample.liked_count} · 藏 {topicSample.collected_count}</span></div><label>选题标题（选填）<input value={topicTitle} onChange={(event) => setTopicTitle(event.target.value)} placeholder="不填写则使用样本标题" /></label><p className="modal-help">留空会使用上方样本标题；填写后则使用你的新标题。选题仍会保留原帖链接和来源记录。</p><div className="modal-actions"><button type="button" className="ghost" onClick={() => setTopicSample(null)}>取消</button><button className="primary">加入正式选题库</button></div></form></div> : null}
   </div>;
@@ -278,6 +391,7 @@ function Topics({ data, action, busy }: { data: AppData; action: (payload: Recor
   const [accountId, setAccountId] = useState(data.accounts[0]?.id ?? "");
   const [angle, setAngle] = useState("");
   const [topicFilter, setTopicFilter] = useState("unclaimed");
+  const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const topicGroups = [
     { id: "all", label: "全部", matches: () => true },
     { id: "unclaimed", label: "待认领", matches: (topic: Topic) => !topic.claim_status },
@@ -288,19 +402,33 @@ function Topics({ data, action, busy }: { data: AppData; action: (payload: Recor
   ];
   const activeGroup = topicGroups.find((group) => group.id === topicFilter) || topicGroups[0];
   const visibleTopics = data.topics.filter(activeGroup.matches);
+  const allVisibleTopicsSelected = Boolean(visibleTopics.length) && visibleTopics.every((topic) => selectedTopics.includes(topic.id));
+
+  function toggleTopic(topicId: string) {
+    setSelectedTopics((current) => current.includes(topicId) ? current.filter((id) => id !== topicId) : [...current, topicId]);
+  }
+
+  function archiveSelectedTopics() {
+    if (!selectedTopics.length) return;
+    if (!window.confirm(`确定从选题中心删除选中的 ${selectedTopics.length} 个选题吗？\n\n已有的认领、创作、审核和发布记录会继续保留。`)) return;
+    action({ action: "archive_topics_bulk", topic_ids: selectedTopics }, `已从选题中心删除 ${selectedTopics.length} 个选题，相关内容任务和历史记录已保留`);
+    setSelectedTopics([]);
+  }
 
   return <div className="page-stack">
     <section className="panel creation-strip"><div><span className="section-kicker">快速创建</span><h2>把一个想法加入团队选题池</h2></div><form onSubmit={(e) => { e.preventDefault(); action({ action: "create_topic", title, source_url: url, relevance: "中" }, "选题已创建"); setTitle(""); setUrl(""); }}><input value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="输入选题标题" /><input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="来源链接（选填）" /><button className="primary" disabled={busy}>添加选题</button></form></section>
     <section className="panel data-panel">
       <div className="panel-head"><div><h2>团队选题库</h2><p>每个选题都保留真实来源、互动数据、拆解和认领记录</p></div><span className="count-chip">{visibleTopics.length} / {data.topics.length} 个选题</span></div>
       <div className="topic-status-tabs" aria-label="按选题状态筛选">{topicGroups.map((group) => { const count = data.topics.filter(group.matches).length; return <button key={group.id} className={topicFilter === group.id ? "active" : ""} onClick={() => setTopicFilter(group.id)}>{group.label}<span>{count}</span></button>; })}</div>
-      {visibleTopics.length ? <div className="data-list topic-cards">{visibleTopics.map((topic) => <article className={`topic-row ${topic.brief ? "analyzed" : ""}`} key={topic.id}>
+      {visibleTopics.length ? <div className="topic-batch-bar"><label><input type="checkbox" checked={allVisibleTopicsSelected} onChange={() => setSelectedTopics(allVisibleTopicsSelected ? selectedTopics.filter((id) => !visibleTopics.some((topic) => topic.id === id)) : Array.from(new Set([...selectedTopics, ...visibleTopics.map((topic) => topic.id)])))} />全选当前分类</label><span>已选择 {selectedTopics.length} 个选题</span><button className="ghost" disabled={!selectedTopics.length || busy} onClick={() => setSelectedTopics([])}>清空</button><button className="danger-outline" disabled={!selectedTopics.length || busy} onClick={archiveSelectedTopics}>{busy ? "正在处理…" : `批量删除${selectedTopics.length ? `（${selectedTopics.length}）` : ""}`}</button></div> : null}
+      {visibleTopics.length ? <div className="data-list topic-cards">{visibleTopics.map((topic) => <article className={`topic-row ${topic.brief ? "analyzed" : ""} ${selectedTopics.includes(topic.id) ? "selected" : ""}`} key={topic.id}>
+        <label className="topic-selector" aria-label={`选择 ${topic.title}`}><input type="checkbox" checked={selectedTopics.includes(topic.id)} onChange={() => toggleTopic(topic.id)} /></label>
         <div className="topic-index">{topic.heat_score || topic.score || topic.title.slice(0, 1)}</div>
-        <div className="topic-info"><div className="topic-title-line"><div><span>选题标题</span><h3>{topic.title}</h3></div><span className={`soft-badge ${topic.status}`}>{topic.claim_status ? claimStatus[topic.claim_status] || topic.claim_status : "待认领"}</span></div><div className="topic-source-grid"><div><span>链接</span>{topic.source_url ? <a href={topic.source_url} target="_blank" rel="noreferrer">打开原笔记 ↗</a> : <strong>—</strong>}</div><div><span>作者</span><strong>{topic.source_author || "—"}</strong></div><div><span>关键词</span><strong>{topic.source_keyword ? `#${topic.source_keyword}` : "—"}</strong></div><div><span>点赞</span><strong>{topic.liked_count || "—"}</strong></div><div><span>收藏</span><strong>{topic.collected_count || "—"}</strong></div><div><span>评论</span><strong>{topic.comment_count || "—"}</strong></div><div><span>热度分</span><strong>{topic.heat_score ?? "—"}</strong></div><div><span>状态</span><strong>{topic.claim_status ? claimStatus[topic.claim_status] || topic.claim_status : "待认领"}</strong></div><div><span>认领人</span><strong>{topic.claim_owner_name || "未认领"}</strong></div><div><span>抓取日期</span><strong>{topic.captured_at ? dateTime(topic.captured_at) : "—"}</strong></div><div><span>笔记日期</span><strong>{topic.note_published_at ? dateOnly(topic.note_published_at) : "—"}</strong></div><div><span>笔记ID</span><strong className="note-id">{topic.note_id || "—"}</strong></div></div><div className="topic-breakdown"><div className="topic-summary"><span>内容摘要</span><p>{topic.brief || "人工添加的选题，暂无自动摘要。"}</p></div><div className="topic-hooks"><span>爆点拆解</span><p>{topic.hook_points?.length ? topic.hook_points.join(" · ") : "暂无自动拆解"}</p></div>{topic.brief ? <dl><div><dt>目标用户</dt><dd>{topic.target_audience}</dd></div><div><dt>核心痛点</dt><dd>{topic.pain_point}</dd></div><div><dt>内容结构</dt><dd>{topic.content_structure?.join(" → ")}</dd></div><div><dt>账号匹配</dt><dd>{topic.account_fit}</dd></div></dl> : null}<small>创建人 {topic.creator_name} · 参考 {topic.source_feed_ids?.length || (topic.note_id ? 1 : 0)} 条真实样本</small></div></div>
-        <button className="outline topic-claim-button" disabled={!data.accounts.length} onClick={() => setClaiming(topic)}>{topic.claim_status ? "再次认领" : "认领创作"}</button>
+        <div className="topic-info"><div className="topic-title-line"><div><span>选题标题</span><h3>{topic.title}</h3></div><span className={`soft-badge ${topic.status}`}>{topic.note_id && !topic.source_detail_verified ? "来源正文未验证" : topic.claim_status ? claimStatus[topic.claim_status] || topic.claim_status : "待认领"}</span></div><div className="topic-source-grid"><div><span>链接</span>{topic.source_url ? <a href={topic.source_url} target="_blank" rel="noreferrer">打开原笔记 ↗</a> : <strong>暂无</strong>}</div><div><span>作者</span><strong>{topic.source_author || "暂无"}</strong></div><div><span>关键词</span><strong>{topic.source_keyword ? `#${topic.source_keyword}` : "暂无"}</strong></div><div><span>点赞</span><strong>{topic.liked_count || "暂无"}</strong></div><div><span>收藏</span><strong>{topic.collected_count || "暂无"}</strong></div><div><span>评论</span><strong>{topic.comment_count || "暂无"}</strong></div><div><span>热度分</span><strong>{topic.heat_score ?? "暂无"}</strong></div><div><span>状态</span><strong>{topic.note_id && !topic.source_detail_verified ? "不可认领" : topic.claim_status ? claimStatus[topic.claim_status] || topic.claim_status : "待认领"}</strong></div><div><span>认领人</span><strong>{topic.claim_owner_name || "未认领"}</strong></div><div><span>抓取日期</span><strong>{topic.captured_at ? dateTime(topic.captured_at) : "暂无"}</strong></div><div><span>笔记日期</span><strong>{topic.note_published_at ? dateOnly(topic.note_published_at) : "暂无"}</strong></div><div><span>笔记ID</span><strong className="note-id">{topic.note_id || "暂无"}</strong></div></div><div className="topic-breakdown"><div className="topic-summary"><span>内容摘要</span><p>{topic.note_id && !topic.source_detail_verified ? "该选题由旧逻辑在正文获取失败时生成，拆解内容仅供排查，不应作为创作依据。" : topic.brief || "人工添加的选题，暂无自动摘要。"}</p></div><div className="topic-hooks"><span>爆点拆解</span><p>{topic.note_id && !topic.source_detail_verified ? "等待来源正文验证" : topic.hook_points?.length ? topic.hook_points.join(" · ") : "暂无自动拆解"}</p></div>{topic.brief && (!topic.note_id || Boolean(topic.source_detail_verified)) ? <dl><div><dt>目标用户</dt><dd>{topic.target_audience}</dd></div><div><dt>核心痛点</dt><dd>{topic.pain_point}</dd></div><div><dt>内容结构</dt><dd>{topic.content_structure?.join(" → ")}</dd></div><div><dt>账号匹配</dt><dd>{topic.account_fit}</dd></div></dl> : null}<small>创建人 {topic.creator_name} · 参考 {topic.source_feed_ids?.length || (topic.note_id ? 1 : 0)} 条真实样本</small></div></div>
+        <button className="outline topic-claim-button" disabled={!data.accounts.length || Boolean(topic.note_id && !topic.source_detail_verified)} onClick={() => setClaiming(topic)}>{topic.note_id && !topic.source_detail_verified ? "等待正文验证" : topic.claim_status ? "再次认领" : "认领创作"}</button>
       </article>)}</div> : <Empty title={`${activeGroup.label}分类暂无选题`} text={data.topics.length ? "可以切换上方状态查看其他选题。" : "去爆款选题页说一句话，系统会自动采集、拆解并生成选题。"} />}
     </section>
-    {claiming ? <div className="modal-backdrop"><form className="modal" onSubmit={(e) => { e.preventDefault(); action({ action: "claim_topic", topic_id: claiming.id, account_id: accountId, angle }, "认领成功，已进入我的内容"); setClaiming(null); }}><span className="section-kicker">认领创作</span><h2>{claiming.title}</h2>{claiming.brief ? <div className="source-sample"><small>选题拆解</small><strong>{claiming.brief}</strong><span>{claiming.hook_points?.join(" · ")}</span></div> : null}<label>发布账号<select value={accountId} onChange={(e) => setAccountId(e.target.value)}>{data.accounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {accountStatus[account.status]}</option>)}</select></label><label>创作角度<textarea value={angle} onChange={(e) => setAngle(e.target.value)} placeholder={claiming.pain_point || "例如：从普通上班族的真实体验切入"} /></label><div className="modal-actions"><button type="button" className="ghost" onClick={() => setClaiming(null)}>取消</button><button className="primary" disabled={busy}>确认认领</button></div></form></div> : null}
+    {claiming ? <div className="modal-backdrop"><form className="modal" onSubmit={(e) => { e.preventDefault(); action({ action: "claim_topic", topic_id: claiming.id, account_id: accountId, angle }, `已由 ${data.user.name} 认领，进入团队内容`); setClaiming(null); }}><span className="section-kicker">认领创作</span><h2>{claiming.title}</h2>{claiming.brief ? <div className="source-sample"><small>选题拆解</small><strong>{claiming.brief}</strong><span>{claiming.hook_points?.join(" · ")}</span></div> : null}<div className="claim-worker-note"><span>认领工作人员</span><strong>{data.user.name}</strong><small>@{data.user.username} · {roleLabel(data.user.roles)}</small></div><label>发布账号<select value={accountId} onChange={(e) => setAccountId(e.target.value)}>{data.accounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {accountStatus[account.status]}</option>)}</select></label><label>创作角度<textarea value={angle} onChange={(e) => setAngle(e.target.value)} placeholder={claiming.pain_point || "例如：从普通上班族的真实体验切入"} /></label><div className="modal-actions"><button type="button" className="ghost" onClick={() => setClaiming(null)}>取消</button><button className="primary" disabled={busy}>确认由我认领</button></div></form></div> : null}
   </div>;
 }
 
@@ -318,9 +446,9 @@ function LegacyContent({ data, action, busy }: { data: AppData; action: (payload
 }
 
 function Content({ data, action, busy, reload, notify }: { data: AppData; action: (payload: Record<string, unknown>, success: string) => void; busy: boolean; reload: () => Promise<void>; notify: (message: string) => void }) {
-  const ownedClaims = data.claims.filter((claim) => claim.owner_id === data.user.id || data.user.roles.includes("admin"));
+  const teamClaims = data.claims;
   const [selectedAccountId, setSelectedAccountId] = useState("");
-  const accountClaims = selectedAccountId ? ownedClaims.filter((claim) => claim.account_id === selectedAccountId) : [];
+  const accountClaims = selectedAccountId ? teamClaims.filter((claim) => claim.account_id === selectedAccountId) : [];
   const [selectedId, setSelectedId] = useState("");
   const selected = accountClaims.find((claim) => claim.id === selectedId) ?? accountClaims[0];
   const [creative, setCreative] = useState<CreativeDraft>(() => blankCreative(selected));
@@ -340,7 +468,7 @@ function Content({ data, action, busy, reload, notify }: { data: AppData; action
 
   function selectAccount(accountId: string) {
     setSelectedAccountId(accountId);
-    const first = ownedClaims.find((claim) => claim.account_id === accountId);
+    const first = teamClaims.find((claim) => claim.account_id === accountId);
     if (first) selectTask(first);
     else {
       setSelectedId("");
@@ -428,7 +556,7 @@ function Content({ data, action, busy, reload, notify }: { data: AppData; action
   }
 
   const selectedAccount = data.accounts.find((account) => account.id === selectedAccountId);
-  const accountSelector = <section className="panel content-account-selector"><div><span className="section-kicker">第一步 · 选择账号</span><h2>先选择要处理的小红书账号</h2><p>选择后只展示这个账号从选题中心认领的内容，以及它当前所在的创作、审核和发布阶段。</p></div><div className="content-account-grid">{data.accounts.map((account) => { const claims = ownedClaims.filter((claim) => claim.account_id === account.id); const active = claims.filter((claim) => ["writing", "revision"].includes(claim.status)).length; return <button key={account.id} className={selectedAccountId === account.id ? "selected" : ""} onClick={() => selectAccount(account.id)}><span className="account-avatar" style={account.avatar_url ? { backgroundImage: `url(${account.avatar_url})` } : { background: account.color }}>{account.avatar_url ? "" : (account.xhs_nickname || account.name).slice(0, 1)}</span><div><strong>{account.xhs_nickname || account.name}</strong><small>{claims.length} 个认领内容 · {active} 个待创作</small></div><i>{selectedAccountId === account.id ? "已选择" : "选择"}</i></button>; })}</div></section>;
+  const accountSelector = <section className="panel content-account-selector"><div><span className="section-kicker">团队共享内容 · 选择账号</span><h2>查看团队在各账号下的全部内容</h2><p>所有成员看到同一批已认领内容，可以共同生成、编辑和提交；原负责人信息继续保留。</p></div><div className="content-account-grid">{data.accounts.map((account) => { const claims = teamClaims.filter((claim) => claim.account_id === account.id); const active = claims.filter((claim) => ["writing", "revision"].includes(claim.status)).length; return <button key={account.id} className={selectedAccountId === account.id ? "selected" : ""} onClick={() => selectAccount(account.id)}><span className="account-avatar" style={account.avatar_url ? { backgroundImage: `url(${account.avatar_url})` } : { background: account.color }}>{account.avatar_url ? "" : (account.xhs_nickname || account.name).slice(0, 1)}</span><div><strong>{account.xhs_nickname || account.name}</strong><small>{claims.length} 个团队内容 · {active} 个待创作</small></div><i>{selectedAccountId === account.id ? "已选择" : "选择"}</i></button>; })}</div></section>;
 
   if (!data.accounts.length) return <section className="panel"><Empty title="还没有小红书账号" text="先到账号中心添加并登录一个真实账号。" /></section>;
   if (!selectedAccountId) return <div className="content-account-page">{accountSelector}<section className="panel content-account-empty"><Empty title="请选择一个账号" text="选择账号后，才会显示对应账号认领的内容任务。" /></section></div>;
@@ -525,7 +653,7 @@ function Publish({ data, reload, notify }: { data: AppData; reload: () => Promis
   }
 
   async function publishNow(claim: Claim) {
-    if (!window.confirm(`确认立即发布到账号“${claim.account_name}”吗？\n\n${claim.title || claim.topic_title}`)) return;
+    if (!window.confirm(`确认执行真实发布吗？\n\n发布账号：${claim.account_name}\n内容负责人：${claim.owner_name}\n发布操作人：${data.user.name}\n\n${claim.title || claim.topic_title}`)) return;
     setWorking(claim.id); notify("");
     try {
       await jsonRequest("/api/publish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "publish_now", claim_id: claim.id }) });
@@ -534,18 +662,31 @@ function Publish({ data, reload, notify }: { data: AppData; reload: () => Promis
     finally { setWorking(""); }
   }
 
+  async function returnForRevision(claim: Claim) {
+    const reason = window.prompt("请输入退回修改原因，工作人员会在“我的内容”中看到：", claim.publish_error || "");
+    if (reason === null) return;
+    if (!reason.trim()) { notify("请填写退回修改原因"); return; }
+    setWorking(claim.id); notify("");
+    try {
+      await jsonRequest("/api/publish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "return_for_revision", claim_id: claim.id, reason: reason.trim() }) });
+      if (viewing?.id === claim.id) setViewing(null);
+      await reload(); notify("内容已退回修改，原文案、配图和历史审核记录均已保留");
+    } catch (error) { await reload(); notify(error instanceof Error ? error.message : "退回修改失败"); }
+    finally { setWorking(""); }
+  }
+
   const frozen = viewing?.publish_snapshot;
   return <>
     <section className="panel data-panel publish-panel">
-      <div className="panel-head publish-head"><div><h2>发布列表</h2><p>审核通过的内容在这里准备图片、确认账号并执行真实发布</p></div><div className="publish-tabs"><button className={filter === "pending" ? "active" : ""} onClick={() => setFilter("pending")}>未发布 {pending.length}</button><button className={filter === "published" ? "active" : ""} onClick={() => setFilter("published")}>已发布 {published.length}</button></div></div>
+      <div className="panel-head publish-head"><div><h2>发布列表</h2><p>发布前同时确认小红书账号、内容负责人和实际发布工作人员</p></div><div className="publish-tabs"><button className={filter === "pending" ? "active" : ""} onClick={() => setFilter("pending")}>未发布 {pending.length}</button><button className={filter === "published" ? "active" : ""} onClick={() => setFilter("published")}>已发布 {published.length}</button></div></div>
       {items.length ? <div className="publish-list">{items.map((claim) => <article className="publish-card" key={claim.id}>
-        <div className="publish-card-main"><span className="account-avatar" style={{ background: claim.account_color }}>{claim.account_name.slice(0, 1)}</span><div><h3>{claim.publish_snapshot?.title || claim.title || claim.topic_title}</h3><p>{claim.account_name} · 负责人 {claim.owner_name}</p><div className="tag-line">{(claim.publish_snapshot?.tags || claim.tags).map((tag) => <span key={tag}>#{tag.replace(/^#/, "")}</span>)}</div></div><button className="outline view-content-button" onClick={() => setViewing(claim)}>查看内容</button></div>
-        <div className="publish-meta"><span className={`status ${toneFor(claim.status)}`}>{claim.status_label}</span><span>{claim.publish_images?.length || 0} 张配图</span><span>{claim.published_at ? `发布于 ${dateTime(claim.published_at)}` : `更新于 ${dateTime(claim.updated_at)}`}</span></div>
+        <div className="publish-card-main"><span className="account-avatar" style={{ background: claim.account_color }}>{claim.account_name.slice(0, 1)}</span><div><h3>{claim.publish_snapshot?.title || claim.title || claim.topic_title}</h3><p>发布账号 {claim.account_name} · 内容负责人 {claim.owner_name}</p><div className="tag-line">{(claim.publish_snapshot?.tags || claim.tags).map((tag) => <span key={tag}>#{tag.replace(/^#/, "")}</span>)}</div></div><button className="outline view-content-button" onClick={() => setViewing(claim)}>查看内容</button></div>
+        <div className="publish-meta"><span className={`status ${toneFor(claim.status)}`}>{claim.status_label}</span><span>工作人员 {claim.publisher_name || `${data.user.name}（当前）`}</span><span>{claim.publish_images?.length || 0} 张配图</span><span>{claim.published_at ? `发布于 ${dateTime(claim.published_at)}` : `更新于 ${dateTime(claim.updated_at)}`}</span></div>
         {claim.publish_error ? <div className="publish-error">上次发布失败：{claim.publish_error}</div> : null}
-        {filter === "pending" ? <div className="publish-actions"><label className="outline upload-button">{working === claim.id ? "处理中…" : claim.publish_images?.length ? "重新选择图片" : "选择发布图片"}<input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={Boolean(working)} onChange={(event) => { void uploadImages(claim, event.target.files); event.currentTarget.value = ""; }} /></label><button className="primary" disabled={Boolean(working) || !claim.publish_images?.length || claim.status === "publishing"} onClick={() => publishNow(claim)}>{working === claim.id || claim.status === "publishing" ? "发布处理中…" : claim.status === "failed" ? "确认后重新发布" : "确认并发布到小红书"}</button></div> : <div className="published-note">已完成发布，平台保留审核快照、账号和发布时间记录。</div>}
+        {filter === "pending" ? <div className="publish-actions"><span>本次发布操作人：{data.user.name}</span><button className="danger-outline" disabled={Boolean(working) || claim.status === "publishing"} onClick={() => returnForRevision(claim)}>退回修改</button><label className="outline upload-button">{working === claim.id ? "处理中…" : claim.publish_images?.length ? "重新选择图片" : "选择发布图片"}<input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={Boolean(working)} onChange={(event) => { void uploadImages(claim, event.target.files); event.currentTarget.value = ""; }} /></label><button className="primary" disabled={Boolean(working) || !claim.publish_images?.length || claim.status === "publishing"} onClick={() => publishNow(claim)}>{working === claim.id || claim.status === "publishing" ? "发布处理中…" : claim.status === "failed" ? "确认后重新发布" : "确认并发布到小红书"}</button></div> : <div className="published-note">由 {claim.publisher_name || "工作人员未记录"} 发布；平台保留审核快照、账号和发布时间记录。</div>}
       </article>)}</div> : <Empty title={filter === "pending" ? "没有未发布内容" : "还没有已发布内容"} text={filter === "pending" ? "内容审核通过后会自动进入这里。" : "通过本页面成功发布的内容会保留在这里。"} />}
     </section>
-    {viewing ? <div className="modal-backdrop"><section className="modal publish-preview-modal" role="dialog" aria-modal="true" aria-label="发布内容预览"><div className="publish-preview-head"><div><span className="section-kicker">审核冻结内容</span><h2>{frozen?.title || viewing.title || viewing.topic_title}</h2></div><button className="ghost" onClick={() => setViewing(null)} aria-label="关闭内容预览">×</button></div><div className="publish-preview-meta"><span>{viewing.account_name}</span><span>{viewing.status_label}</span><span>{viewing.publish_images?.length || 0} 张配图</span>{frozen?.approved_at ? <span>审核于 {dateTime(frozen.approved_at)}</span> : null}</div><div className="publish-preview-body">{frozen?.body || viewing.body || "暂无正文"}</div><div className="tag-line publish-preview-tags">{(frozen?.tags || viewing.tags).map((tag) => <span key={tag}>#{tag.replace(/^#/, "")}</span>)}</div><div className="modal-actions"><button className="primary" onClick={() => setViewing(null)}>关闭</button></div></section></div> : null}
+    {viewing ? <div className="modal-backdrop"><section className="modal publish-preview-modal" role="dialog" aria-modal="true" aria-label="发布内容预览"><div className="publish-preview-head"><div><span className="section-kicker">审核冻结内容</span><h2>{frozen?.title || viewing.title || viewing.topic_title}</h2></div><button className="ghost" onClick={() => setViewing(null)} aria-label="关闭内容预览">×</button></div><div className="publish-preview-meta"><span>账号 {viewing.account_name}</span><span>负责人 {viewing.owner_name}</span><span>发布人 {viewing.publisher_name || (viewing.status === "published" ? "未记录" : data.user.name)}</span><span>{viewing.status_label}</span><span>{viewing.publish_images?.length || 0} 张配图</span>{frozen?.approved_at ? <span>审核于 {dateTime(frozen.approved_at)}</span> : null}</div><div className="publish-preview-body">{frozen?.body || viewing.body || "暂无正文"}</div><div className="tag-line publish-preview-tags">{(frozen?.tags || viewing.tags).map((tag) => <span key={tag}>#{tag.replace(/^#/, "")}</span>)}</div><div className="modal-actions"><button className="primary" onClick={() => setViewing(null)}>关闭</button></div></section></div> : null}
   </>;
 }
 
@@ -572,7 +713,7 @@ function AccountOverview({ account, claims, connecting, xhs }: { account: Accoun
   const inProgress = claims.filter((claim) => ["writing", "revision", "review"].includes(claim.status)).length;
   const waiting = claims.filter((claim) => ["approved", "queued", "publishing"].includes(claim.status)).length;
   const published = claims.filter((claim) => claim.status === "published").length;
-  const value = (item?: string | number | null) => item === undefined || item === null || item === "" ? "—" : item;
+  const value = (item?: string | number | null) => item === undefined || item === null || item === "" ? "暂无" : item;
   return <article className="panel account-card"><div className="account-profile-head"><span className="large-avatar" style={account.avatar_url ? { backgroundImage: `url(${account.avatar_url})` } : { background: account.color }}>{account.avatar_url ? "" : account.name.slice(0, 1)}</span><div><h2>{account.xhs_nickname || account.name}</h2><p>{account.xhs_red_id ? `小红书号 ${account.xhs_red_id}` : account.xhs_user_id ? `用户ID ${account.xhs_user_id}` : "尚未绑定小红书身份"}</p><small>{account.xhs_user_id ? "登录凭据已保存 · 实时状态需核验" : "尚未保存登录凭据"}</small></div><span className={`account-state ${["login_expired", "unknown", "error"].includes(account.status) ? "error" : ""}`}><i></i>{accountStatus[account.status] || account.status}</span></div><p className="account-bio">{account.profile_bio || (account.status === "online" ? "尚未同步账号简介" : "扫码登录后可读取真实账号概览")}</p><div className="xhs-stats"><span><strong>{value(account.following_count)}</strong>关注</span><span><strong>{value(account.followers_count)}</strong>粉丝</span><span><strong>{value(account.interaction_count)}</strong>获赞与收藏</span><span><strong>{value(account.note_count)}</strong>笔记</span></div><div className="platform-stats"><span>创作中 <strong>{inProgress}</strong></span><span>待发布 <strong>{waiting}</strong></span><span>已发布 <strong>{published}</strong></span></div><p className="sync-time">{account.profile_synced_at ? `账号数据同步于 ${dateTime(account.profile_synced_at)}` : "账号公开数据尚未同步"}</p><div className="account-buttons three"><button className="outline" disabled={connecting} onClick={() => xhs(account, "status")}>{connecting ? "可见核验中…" : "检查登录"}</button><button className="outline" disabled={connecting || account.status !== "online"} onClick={() => xhs(account, "profile")}>{connecting ? "读取中…" : "同步概览"}</button><button className="primary" disabled={connecting} onClick={() => xhs(account, "qrcode")}>{account.status === "online" ? "重新登录" : "扫码登录"}</button></div></article>;
 }
 
@@ -580,10 +721,23 @@ function Logs({ data }: { data: AppData }) { return <section className="panel da
 
 function Settings({ data, action, busy }: { data: AppData; action: (payload: Record<string, unknown>, success: string) => void; busy: boolean }) {
   const [adding, setAdding] = useState(false);
-  return <div className="settings-grid"><section className="panel settings-card"><div className="settings-title"><div><span className="section-kicker">团队成员</span><h2>{data.users.length} 位工作人员</h2></div>{data.user.roles.includes("admin") ? <button className="outline" onClick={() => setAdding(true)}>＋ 添加成员</button> : null}</div>{data.users.map((user) => <div className="member-row" key={user.id}><span className="avatar">{user.name.slice(0, 1)}</span><div><strong>{user.name}</strong><small>@{user.username} · {roleLabel(user.roles)}</small></div><span className="soft-badge">启用</span></div>)}<p className="helper">每人使用独立账号，编辑、审核和发布操作都会记录到个人。</p></section><section className="panel settings-card"><span className="section-kicker">运行方式</span><h2>本机团队模式</h2><dl><div><dt>数据存储</dt><dd>Mac mini 本地数据库</dd></div><div><dt>AI 创作</dt><dd>内置小红书运营专家</dd></div><div><dt>图卡导出</dt><dd>浏览器本地 PNG</dd></div><div><dt>发布并发</dt><dd>最多 2 个浏览器</dd></div><div><dt>公网访问</dt><dd>关闭</dd></div></dl></section>{adding ? <div className="modal-backdrop"><form className="modal" onSubmit={(e) => { e.preventDefault(); const form = new FormData(e.currentTarget); action({ action: "create_user", name: form.get("name"), username: form.get("username"), password: form.get("password"), role: form.get("role") }, "团队成员已添加"); setAdding(false); }}><span className="section-kicker">团队账号</span><h2>添加工作人员</h2><label>姓名<input name="name" required /></label><label>用户名<input name="username" required placeholder="字母、数字、下划线" /></label><label>初始密码<input name="password" type="password" required minLength={8} /></label><label>角色<select name="role"><option value="operator">内容运营</option><option value="reviewer">审核员</option><option value="publisher">发布员</option><option value="readonly">只读成员</option></select></label><div className="modal-actions"><button type="button" className="ghost" onClick={() => setAdding(false)}>取消</button><button className="primary" disabled={busy}>创建账号</button></div></form></div> : null}</div>;
+  const isAdmin = data.user.roles.includes("admin");
+  function removeMember(member: User) {
+    if (!window.confirm(`确认删除团队成员“${member.name}”吗？\n\n该成员会立即退出登录且无法再次登录；其历史创作、审核和发布记录仍会保留。`)) return;
+    action({ action: "remove_user", user_id: member.id }, `已删除成员“${member.name}”并撤销其登录权限`);
+  }
+  return <div className="settings-grid">
+    <section className="panel settings-card">
+      <div className="settings-title"><div><span className="section-kicker">团队成员</span><h2>{data.users.length} 位工作人员</h2></div>{isAdmin ? <button className="outline" onClick={() => setAdding(true)}>＋ 添加成员</button> : null}</div>
+      {data.users.map((member) => <div className="member-row" key={member.id}><span className="avatar">{member.name.slice(0, 1)}</span><div><strong>{member.name}</strong><small>@{member.username} · {roleLabel(member.roles)}</small></div>{member.id === data.user.id ? <span className="soft-badge">当前账号</span> : <><span className="soft-badge">启用</span>{isAdmin ? <button className="danger-outline member-delete" disabled={busy} onClick={() => removeMember(member)}>删除成员</button> : null}</>}</div>)}
+      <p className="helper">删除成员会立即撤销登录权限，但会保留其历史创作、审核、发布和操作记录。</p>
+    </section>
+    <section className="panel settings-card"><span className="section-kicker">运行方式</span><h2>本机团队模式</h2><dl><div><dt>数据存储</dt><dd>Mac mini 本地数据库</dd></div><div><dt>AI 创作</dt><dd>内置小红书运营专家</dd></div><div><dt>图卡导出</dt><dd>浏览器本地 PNG</dd></div><div><dt>发布并发</dt><dd>最多 2 个浏览器</dd></div><div><dt>公网访问</dt><dd>关闭</dd></div></dl></section>
+    {adding ? <div className="modal-backdrop"><form className="modal" onSubmit={(e) => { e.preventDefault(); const form = new FormData(e.currentTarget); action({ action: "create_user", name: form.get("name"), username: form.get("username"), password: form.get("password"), role: form.get("role") }, "团队成员已添加"); setAdding(false); }}><span className="section-kicker">团队账号</span><h2>添加工作人员</h2><label>姓名<input name="name" required /></label><label>用户名<input name="username" required placeholder="字母、数字、下划线" /></label><label>初始密码<input name="password" type="password" required minLength={8} /></label><label>角色<select name="role"><option value="operator">内容运营</option><option value="reviewer">审核员</option><option value="publisher">发布员</option><option value="readonly">只读成员</option></select></label><div className="modal-actions"><button type="button" className="ghost" onClick={() => setAdding(false)}>取消</button><button className="primary" disabled={busy}>创建账号</button></div></form></div> : null}
+  </div>;
 }
 
-function Metric({ icon, tone, label, value, note }: { icon: string; tone: string; label: string; value: number; note: string }) { return <article><span className={`metric-icon ${tone}`}>{icon}</span><div><small>{label}</small><strong>{value}</strong><em>{note}</em></div></article>; }
+function Metric({ icon, tone, label, value, note }: { icon: string; tone: string; label: string; value: number; note: string }) { return <article className={`metric-card metric-${tone}`}><span className={`metric-icon ${tone}`}>{icon}</span><div><small>{label}</small><strong>{value}</strong><em>{note}</em></div></article>; }
 function AccountRow({ account }: { account: Account }) { const error = account.status === "login_expired"; return <div className="account-row"><span className="account-avatar" style={{ background: account.color }}>{account.name.slice(0, 1)}</span><div><strong>{account.name}</strong><small>{error ? "队列已暂停" : `等待队列 ${account.queue_count}`}</small></div><span className={`account-state ${error ? "error" : ""}`}><i></i>{accountStatus[account.status] || account.status}</span></div>; }
 function Empty({ title, text }: { title: string; text: string }) { return <div className="empty"><span>○</span><h3>{title}</h3><p>{text}</p></div>; }
 function toneFor(status: string) { if (["review"].includes(status)) return "amber"; if (["writing"].includes(status)) return "blue"; if (["approved", "queued", "published"].includes(status)) return "violet"; return "rose"; }
