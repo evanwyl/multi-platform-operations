@@ -22,12 +22,23 @@ function parseTextList(value: unknown) {
   catch { return []; }
 }
 
+type AISettings = { configured: boolean; baseUrl: string; model: string; keySource: string; busy?: boolean; unavailable?: boolean };
+
+async function runtimeAI(path: "settings" | "test", options?: RequestInit) {
+  let response: Response;
+  try { response = await fetch(`http://127.0.0.1:18100/ai/${path}`, options); }
+  catch { throw new Error("本机 AI 运行管理器未启动"); }
+  const payload = await response.json() as AISettings & { error?: string };
+  if (!response.ok) throw new Error(payload.error || "AI 配置操作失败");
+  return payload;
+}
+
 export async function GET(request: Request) {
   await ensureDatabase();
   let user;
   try { user = await requireUser(request); } catch (response) { return response as Response; }
   const db = database();
-  const [accounts, topics, claims, logs, users] = await Promise.all([
+  const [accounts, topics, claims, logs, users, aiSettings] = await Promise.all([
     db.prepare("SELECT * FROM accounts WHERE is_demo=0 ORDER BY updated_at, rowid").all(),
     db.prepare(`SELECT t.*,u.name AS creator_name,i.brief,i.target_audience,i.pain_point,i.hook_points,i.content_structure,
       i.why_it_works,i.account_fit,i.source_feed_ids,i.score,
@@ -50,6 +61,7 @@ export async function GET(request: Request) {
       WHERE a.is_demo=0 ORDER BY c.updated_at DESC`).all(),
     db.prepare("SELECT l.*,u.name AS actor_name FROM audit_logs l JOIN users u ON u.id=l.actor_id ORDER BY l.created_at DESC LIMIT 50").all(),
     db.prepare("SELECT id,name,username,roles,status,created_at FROM users WHERE status='active' ORDER BY created_at").all(),
+    runtimeAI("settings").catch(() => ({ configured: false, baseUrl: "https://api.openai.com/v1", model: "gpt-5-mini", keySource: "none", unavailable: true })),
   ]);
   return Response.json({
     user: publicUser(user), accounts: accounts.results.map((account) => ({
@@ -71,7 +83,7 @@ export async function GET(request: Request) {
       publish_images: JSON.parse(String(claim.publish_images || "[]")),
       publish_snapshot: claim.snapshot ? JSON.parse(String(claim.snapshot)) : null,
     })),
-    logs: logs.results, users: users.results.map((row) => ({ ...row, roles: JSON.parse(String(row.roles)) })),
+    logs: logs.results, users: users.results.map((row) => ({ ...row, roles: JSON.parse(String(row.roles)) })), ai_settings: aiSettings,
   });
 }
 
@@ -83,6 +95,27 @@ export async function POST(request: Request) {
   const data = await request.json() as Record<string, unknown>;
   const action = String(data.action ?? "");
   const now = new Date().toISOString();
+
+  if (action === "save_ai_settings" || action === "test_ai_settings") {
+    const roles = JSON.parse(user.roles) as string[];
+    if (!roles.includes("admin")) return Response.json({ error: "只有管理员可以修改 AI 配置" }, { status: 403 });
+    try {
+      if (action === "test_ai_settings") return Response.json(await runtimeAI("test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ baseUrl: data.base_url, model: data.model, apiKey: data.api_key }),
+      }));
+      const payload = await runtimeAI("settings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ baseUrl: data.base_url, model: data.model, apiKey: data.api_key }),
+      });
+      await audit(user.id, "更新AI配置", "settings", "ai", `${payload.baseUrl} / ${payload.model}`);
+      return Response.json(payload);
+    } catch (error) {
+      return Response.json({ error: error instanceof Error ? error.message : "AI 配置操作失败" }, { status: 502 });
+    }
+  }
 
   if (action === "create_account") {
     const roles = JSON.parse(user.roles) as string[];
@@ -196,14 +229,14 @@ export async function POST(request: Request) {
     return Response.json({ ok: true, id }, { status: 201 });
   }
 
-  if (action === "save_draft" || action === "import_codex") {
+  if (action === "save_draft") {
     const id = String(data.id ?? "");
     const claim = await db.prepare("SELECT owner_id,status FROM claims WHERE id=?").bind(id).first<{ owner_id: string; status: string }>();
     if (!claim) return Response.json({ error: "内容任务不存在" }, { status: 404 });
     const tags = Array.isArray(data.tags) ? data.tags : String(data.tags ?? "").split(/[，,\s]+/).filter(Boolean);
     await db.prepare("UPDATE claims SET title=?,body=?,tags=?,status=CASE WHEN status='revision' THEN 'writing' ELSE status END,updated_at=? WHERE id=?")
       .bind(String(data.title ?? "").trim(), String(data.body ?? "").trim(), JSON.stringify(tags), now, id).run();
-    await audit(user.id, action === "import_codex" ? "导入Codex结果" : "保存草稿", "claim", id);
+    await audit(user.id, "保存草稿", "claim", id);
     return Response.json({ ok: true });
   }
 

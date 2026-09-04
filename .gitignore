@@ -19,6 +19,7 @@ platform/runtime/generated/
 platform/runtime/accounts/
 platform/runtime/logs/
 platform/runtime/publish-assets/
+platform/runtime/config/
 platform/public/generated/
 
 # Dependencies, builds and local tool state

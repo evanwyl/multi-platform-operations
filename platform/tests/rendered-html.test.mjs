@@ -32,20 +32,57 @@ test("keeps AI creation mounted and recommends whole-post image prompts without 
   assert.match(source, /整个帖子的图片提示词/);
   assert.match(source, /复制全部提示词/);
   assert.match(creationRoute, /image_prompts/);
-  assert.match(creationRoute, /这是一次 Codex 调用和一次结构化返回/);
+  assert.match(creationRoute, /这是一次 AI 调用和一次结构化返回/);
+  assert.match(creationRoute, /enforceCoverTitle/);
+  assert.match(creationRoute, /画面必须逐字、清晰呈现/);
+  assert.match(source, /withCoverTitle/);
+  assert.match(source, /封面主视觉必须包含上方最终标题的逐字文字/);
   assert.doesNotMatch(source, /saved\.pages|legacyPrompts/);
   assert.doesNotMatch(creationRoute, /draft\.pages|legacyPrompts/);
   assert.doesNotMatch(source, /3:4 页面预览|creative-gallery|downloadCreativeCard|单页重做/);
   assert.doesNotMatch(creationRoute, /regenerate_page|content-page/);
   assert.doesNotMatch(source, /action: "generate_image"|AI 生图中|下载 AI 原图/);
   assert.doesNotMatch(runtime, /\/codex\/image|runImageGen|imageGeneration|content-page/);
-  assert.match(runtime, /imagegenSkill/);
-  assert.match(runtime, /同一次 Codex 执行中同时完成文案和整篇配图提示词/);
+  assert.match(runtime, /content-system\.md/);
+  assert.match(runtime, /humanizer-system\.md/);
+  assert.match(runtime, /EMBEDDED_HUMANIZER_SKILL/);
+  assert.match(runtime, /response_format/);
+  assert.match(runtime, /json_schema/);
   assert.match(source, /保存并提交审核/);
   assert.match(source, /团队共享内容 · 选择账号/);
   assert.match(source, /请选择一个账号/);
   assert.match(source, /accountClaims/);
   assert.match(source, /contentStageLabel/);
+});
+
+test("runs the Humanizer skill after Xiaohongshu expert drafting", async () => {
+  const creationRoute = await readFile(new URL("../app/api/creation/route.ts", import.meta.url), "utf8");
+  const contentPrompt = await readFile(new URL("../runtime/prompts/content-system.md", import.meta.url), "utf8");
+  const humanizerPrompt = await readFile(new URL("../runtime/prompts/humanizer-system.md", import.meta.url), "utf8");
+  assert.match(creationRoute, /小红书运营专家完成初稿 → Humanizer/);
+  assert.match(contentPrompt, /不得跳过第二遍去 AI 味检查/);
+  assert.match(humanizerPrompt, /blader\/humanizer/);
+  assert.match(humanizerPrompt, /版本 `2\.11\.2`/);
+  assert.match(humanizerPrompt, /不虚构事实、体验、情绪、案例/);
+  assert.match(humanizerPrompt, /不把面向生图模型的 `image_prompts` 当作普通文章改写/);
+  assert.match(humanizerPrompt, /最终标题与封面主视觉提示词中的标题逐字一致/);
+});
+
+test("uses a locally configured AI API without exposing or requiring Codex", async () => {
+  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
+  const appRoute = await readFile(new URL("../app/api/app/route.ts", import.meta.url), "utf8");
+  const runtime = await readFile(new URL("../runtime/manager.mjs", import.meta.url), "utf8");
+  assert.match(source, /连接你自己的 AI 服务/);
+  assert.match(source, /测试当前输入/);
+  assert.match(source, /action: "test_ai_settings", base_url: baseUrl, model, api_key: apiKey/);
+  assert.match(appRoute, /save_ai_settings/);
+  assert.match(appRoute, /test_ai_settings/);
+  assert.match(runtime, /\/chat\/completions/);
+  assert.match(runtime, /runtime\/config/);
+  assert.match(runtime, /response_format/);
+  assert.match(runtime, /role: "system"/);
+  assert.doesNotMatch(runtime, /role: "developer"/);
+  assert.doesNotMatch(runtime, /CODEX_BINARY|codex exec|ChatGPT\.app/);
 });
 
 test("includes successfully fetched source notes as protected rewrite references", async () => {
@@ -103,7 +140,7 @@ test("preserves requested media type and progressively enriches retained researc
   assert.match(source, /AbortController/);
   assert.match(route, /action === "cancel_scan"/);
   assert.match(route, /status='cancelled'/);
-  assert.match(route, /codex\/cancel/);
+  assert.match(route, /ai\/cancel/);
   assert.match(source, /等待处理/);
   assert.match(source, /只保留标题、作者和真实互动数据/);
   assert.match(route, /metricValue\(sample\.liked_count\) \+ metricValue\(sample\.collected_count\) \* 1\.5 \+ metricValue\(sample\.comment_count\) \* 2/);

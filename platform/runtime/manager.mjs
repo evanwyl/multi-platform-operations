@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -15,10 +15,16 @@ const root = resolve(process.cwd(), "runtime/accounts");
 const analysisRoot = resolve(process.cwd(), "runtime/analysis");
 const publishAssetRoot = resolve(process.cwd(), "runtime/publish-assets");
 const trendCoverRoot = resolve(process.cwd(), "public/trend-covers");
-const binary = process.env.XHS_MCP_BINARY || join(homedir(), ".hermes/services/xiaohongshu-mcp/bin/xiaohongshu-mcp-darwin-arm64");
-const codexBinary = process.env.CODEX_BINARY || "/Applications/ChatGPT.app/Contents/Resources/codex";
-const xhsExpertSkill = process.env.XHS_EXPERT_SKILL || join(homedir(), ".codex/skills/xiaohongshu-operations-expert/SKILL.md");
-const imagegenSkill = process.env.IMAGEGEN_SKILL || join(homedir(), ".codex/skills/.system/imagegen/SKILL.md");
+const configRoot = resolve(process.cwd(), "runtime/config");
+const aiConfigPath = join(configRoot, "ai.json");
+const bundledXhsBinary = resolve(process.cwd(), "runtime/bin/xiaohongshu-mcp-darwin-arm64");
+const legacyXhsBinary = join(homedir(), ".hermes/services/xiaohongshu-mcp/bin/xiaohongshu-mcp-darwin-arm64");
+const binary = process.env.XHS_MCP_BINARY || (existsSync(bundledXhsBinary) ? bundledXhsBinary : legacyXhsBinary);
+const promptFiles = {
+  research: resolve(process.cwd(), "runtime/prompts/research-system.md"),
+  content: resolve(process.cwd(), "runtime/prompts/content-system.md"),
+  humanizer: resolve(process.cwd(), "runtime/prompts/humanizer-system.md"),
+};
 const analysisSchemas = {
   "trend-plan": resolve(process.cwd(), "runtime/trend-plan.schema.json"),
   "candidate-screen": resolve(process.cwd(), "runtime/candidate-screen.schema.json"),
@@ -30,8 +36,9 @@ mkdirSync(root, { recursive: true });
 mkdirSync(analysisRoot, { recursive: true });
 mkdirSync(publishAssetRoot, { recursive: true });
 mkdirSync(trendCoverRoot, { recursive: true });
+mkdirSync(configRoot, { recursive: true });
 if (!existsSync(binary)) {
-  process.stderr.write(`找不到小红书 MCP：${binary}\n`);
+  process.stderr.write(`找不到小红书 MCP。请设置 XHS_MCP_BINARY，或把可执行文件放到：${bundledXhsBinary}\n`);
   process.exit(1);
 }
 
@@ -42,8 +49,81 @@ const slots = [
 const acquireQueue = [];
 const QUEUE_TIMEOUT_MS = 10 * 60 * 1000;
 let analysisBusy = false;
-let analysisChild = null;
+let analysisController = null;
 let drainingQueue = false;
+
+const defaultAISettings = {
+  baseUrl: "https://api.openai.com/v1",
+  model: "gpt-5-mini",
+  apiKey: "",
+};
+
+function readAISettings() {
+  let saved = {};
+  try { saved = JSON.parse(readFileSync(aiConfigPath, "utf8")); } catch { void 0; }
+  return {
+    baseUrl: String(process.env.AI_BASE_URL || saved.baseUrl || defaultAISettings.baseUrl).trim().replace(/\/+$/, ""),
+    model: String(process.env.AI_MODEL || saved.model || defaultAISettings.model).trim(),
+    apiKey: String(process.env.AI_API_KEY || saved.apiKey || "").trim(),
+  };
+}
+
+function publicAISettings() {
+  const settings = readAISettings();
+  return {
+    configured: Boolean(settings.apiKey && settings.model && settings.baseUrl),
+    baseUrl: settings.baseUrl,
+    model: settings.model,
+    keySource: process.env.AI_API_KEY ? "environment" : settings.apiKey ? "local" : "none",
+    busy: analysisBusy,
+  };
+}
+
+function validateBaseUrl(value) {
+  let url;
+  try { url = new URL(String(value || "").trim()); } catch { throw Object.assign(new Error("AI API 地址格式不正确"), { status: 400 }); }
+  const local = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  if (url.username || url.password || !["https:", ...(local ? ["http:"] : [])].includes(url.protocol)) {
+    throw Object.assign(new Error("远程 AI API 必须使用 HTTPS；本机服务可以使用 HTTP"), { status: 400 });
+  }
+  return url.toString().replace(/\/+$/, "");
+}
+
+function saveAISettings(payload) {
+  if (process.env.AI_API_KEY) throw Object.assign(new Error("AI 配置由环境变量管理，不能从页面修改"), { status: 409 });
+  const current = readAISettings();
+  const next = {
+    baseUrl: validateBaseUrl(payload.baseUrl ?? current.baseUrl),
+    model: String(payload.model ?? current.model).trim().slice(0, 160),
+    apiKey: String(payload.apiKey ?? "").trim() || current.apiKey,
+  };
+  if (!next.model) throw Object.assign(new Error("请填写 AI 模型名称"), { status: 400 });
+  if (!next.apiKey) throw Object.assign(new Error("请填写 AI API Key"), { status: 400 });
+  const temporary = `${aiConfigPath}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+  renameSync(temporary, aiConfigPath);
+  return publicAISettings();
+}
+
+function systemPrompt(kind) {
+  if (kind !== "content-draft") {
+    if (!existsSync(promptFiles.research)) throw Object.assign(new Error("平台内置 AI 规则缺失"), { status: 503 });
+    return readFileSync(promptFiles.research, "utf8");
+  }
+  if (!existsSync(promptFiles.content) || !existsSync(promptFiles.humanizer)) {
+    throw Object.assign(new Error("平台内置小红书专家或 Humanizer 规则缺失"), { status: 503 });
+  }
+  return `${readFileSync(promptFiles.content, "utf8")}\n\n<EMBEDDED_HUMANIZER_SKILL>\n${readFileSync(promptFiles.humanizer, "utf8")}\n</EMBEDDED_HUMANIZER_SKILL>`;
+}
+
+function strictProviderSchema(value) {
+  if (Array.isArray(value)) return value.map(strictProviderSchema);
+  if (!value || typeof value !== "object") return value;
+  const unsupported = new Set(["$schema", "minLength", "maxLength", "minItems", "maxItems", "minimum", "maximum", "pattern", "format", "uniqueItems"]);
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !unsupported.has(key))
+    .map(([key, item]) => [key, strictProviderSchema(item)]));
+}
 
 function validAccountId(value) {
   return typeof value === "string" && /^[a-zA-Z0-9-]{8,80}$/.test(value);
@@ -106,50 +186,113 @@ async function body(request) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
-async function runCodex(kind, prompt) {
-  const schema = analysisSchemas[kind];
-  if (!schema || !existsSync(schema)) throw Object.assign(new Error("Codex 分析格式未配置"), { status: 400 });
-  if (!existsSync(codexBinary)) throw Object.assign(new Error("本机没有找到 Codex CLI"), { status: 503 });
-  if (kind === "content-draft" && (!existsSync(xhsExpertSkill) || !existsSync(imagegenSkill))) {
-    throw Object.assign(new Error("AI 创作所需的小红书或生图提示词 Skill 未安装完整"), { status: 503 });
-  }
-  if (analysisBusy) throw Object.assign(new Error("Codex 正在分析上一项任务，请稍后重试"), { status: 409 });
-  analysisBusy = true;
+function completionText(payload) {
+  const content = payload?.choices?.[0]?.message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return content.map((part) => part?.text || "").join("");
+  return "";
+}
+
+function providerError(payload, status) {
+  const message = payload?.error?.message || payload?.message;
+  return String(message || `AI 服务请求失败（${status}）`).slice(0, 1000);
+}
+
+async function requestCompletion(settings, requestBody, signal) {
+  let response;
   try {
-    const skilledPrompt = kind === "content-draft"
-      ? `这是平台内的一次性 AI 创作任务，需要在同一次 Codex 执行中同时完成文案和整篇配图提示词。\n开始创作前必须完整读取并遵循：\n1. 小红书运营专家 Skill：${xhsExpertSkill}\n2. Imagegen Skill：${imagegenSkill}\n按照两份 Skill 的路由继续读取本次单篇创作与生图提示词所需参考资料。先在内部完成文案，再基于最终文案完成配图规划和提示词质检，但只能进行这一次执行、一次 JSON 返回。不要调用生图工具，不要在最终 JSON 中解释 Skill、步骤或工作过程。\n\n${prompt}`
-      : prompt;
-    return await new Promise((resolvePromise, rejectPromise) => {
-      const child = spawn(codexBinary, ["exec", "--sandbox", "read-only", "--ephemeral", "--ignore-user-config", "--skip-git-repo-check", "--output-schema", schema, "--color", "never", "-"], {
-        cwd: analysisRoot, env: process.env, stdio: ["pipe", "pipe", "pipe"],
-      });
-      analysisChild = child;
-      let stdout = ""; let stderr = ""; let settled = false;
-      const finish = (error, result) => {
-        if (settled) return; settled = true; clearTimeout(timer);
-        if (analysisChild === child) analysisChild = null;
-        if (error) rejectPromise(error); else resolvePromise(result);
-      };
-      child.stdout.on("data", (chunk) => { if (stdout.length < 2_000_000) stdout += chunk.toString(); });
-      child.stderr.on("data", (chunk) => { if (stderr.length < 20_000) stderr += chunk.toString(); });
-      child.once("error", (error) => finish(error));
-      child.once("exit", (code) => {
-        if (code !== 0) return finish(new Error(stderr.trim() || `Codex 分析失败（${code}）`));
-        try { finish(null, JSON.parse(stdout.trim())); }
-        catch { finish(new Error("Codex 返回的结构化结果无法识别")); }
-      });
-      const timer = setTimeout(() => { child.kill("SIGTERM"); finish(new Error("Codex 分析超过5分钟，已停止本次任务")); }, 5 * 60 * 1000);
-      child.stdin.end(skilledPrompt);
+    response = await fetch(`${settings.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${settings.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify(requestBody),
+      signal,
     });
-  } finally { analysisBusy = false; }
+  } catch (error) {
+    if (signal.aborted) throw Object.assign(new Error("AI 任务已停止"), { status: 499 });
+    throw Object.assign(new Error(`无法连接 AI API：${error instanceof Error ? error.message : "网络错误"}`), { status: 502 });
+  }
+  const raw = await response.text();
+  let payload = {};
+  try { payload = JSON.parse(raw); } catch { void 0; }
+  if (!response.ok) throw Object.assign(new Error(providerError(payload, response.status)), { status: response.status === 401 ? 401 : 502, providerStatus: response.status });
+  return payload;
+}
+
+async function runAI(kind, prompt) {
+  const schema = analysisSchemas[kind];
+  if (!schema || !existsSync(schema)) throw Object.assign(new Error("AI 结构化输出格式未配置"), { status: 400 });
+  const settings = readAISettings();
+  if (!settings.apiKey) throw Object.assign(new Error("尚未配置 AI API Key，请让管理员前往系统设置完成配置"), { status: 503 });
+  if (analysisBusy) throw Object.assign(new Error("AI 正在处理上一项任务，请稍后重试"), { status: 409 });
+  analysisBusy = true;
+  const controller = new AbortController();
+  analysisController = controller;
+  const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+  try {
+    const outputSchema = JSON.parse(readFileSync(schema, "utf8"));
+    const structuredSchema = strictProviderSchema(outputSchema);
+    const messages = [
+      { role: "system", content: systemPrompt(kind) },
+      { role: "user", content: prompt },
+    ];
+    const structuredBody = {
+      model: settings.model,
+      messages,
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: kind.replace(/-/g, "_"), strict: true, schema: structuredSchema },
+      },
+    };
+    let payload;
+    try {
+      payload = await requestCompletion(settings, structuredBody, controller.signal);
+    } catch (error) {
+      const fallbackEligible = error?.providerStatus === 400 && /json.?schema|response.?format|structured|unsupported/i.test(error.message || "");
+      if (!fallbackEligible) throw error;
+      payload = await requestCompletion(settings, {
+        model: settings.model,
+        messages: [
+          { role: "system", content: `${systemPrompt(kind)}\n\n你必须只返回一个符合以下 JSON Schema 的 JSON 对象，不要使用 Markdown 代码块：\n${JSON.stringify(outputSchema)}` },
+          { role: "user", content: prompt },
+        ],
+        response_format: { type: "json_object" },
+      }, controller.signal);
+    }
+    const text = completionText(payload).trim();
+    if (!text) throw Object.assign(new Error(payload?.choices?.[0]?.message?.refusal || "AI 没有返回可识别的内容"), { status: 502 });
+    try { return JSON.parse(text); }
+    catch { throw Object.assign(new Error("AI 返回的结构化结果无法识别，请更换支持 JSON 输出的模型"), { status: 502 }); }
+  } finally {
+    clearTimeout(timeout);
+    if (analysisController === controller) analysisController = null;
+    analysisBusy = false;
+  }
+}
+
+async function testAIConnection(overrides = {}) {
+  const current = readAISettings();
+  const settings = {
+    baseUrl: overrides.baseUrl ? validateBaseUrl(overrides.baseUrl) : current.baseUrl,
+    model: String(overrides.model || current.model).trim(),
+    apiKey: String(overrides.apiKey || current.apiKey).trim(),
+  };
+  if (!settings.apiKey) throw Object.assign(new Error("尚未配置 AI API Key"), { status: 503 });
+  if (!settings.model) throw Object.assign(new Error("请填写 AI 模型名称"), { status: 400 });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const payload = await requestCompletion(settings, {
+      model: settings.model,
+      messages: [{ role: "user", content: "只回复 OK" }],
+    }, controller.signal);
+    if (!completionText(payload).trim()) throw Object.assign(new Error("AI 服务已响应，但没有返回文本"), { status: 502 });
+    return { ok: true, model: settings.model };
+  } finally { clearTimeout(timeout); }
 }
 
 function cancelAnalysis() {
-  if (!analysisChild || analysisChild.exitCode !== null) return false;
-  const child = analysisChild;
-  child.kill("SIGTERM");
-  const timer = setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); }, 3000);
-  timer.unref();
+  if (!analysisController) return false;
+  analysisController.abort();
   return true;
 }
 
@@ -281,16 +424,25 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/slots") {
       return json(response, 200, { pending: acquireQueue.length, slots: slots.map((slot) => ({ port: slot.port, purpose: slot.purpose, accountId: slot.accountId, active: Boolean(slot.child), busy: slot.leased, stopping: slot.stopping, protectedUntil: slot.protectedUntil, lastUsed: slot.lastUsed })) });
     }
-    if (request.method === "GET" && url.pathname === "/codex/health") {
-      return json(response, 200, { ok: existsSync(codexBinary), busy: analysisBusy, authenticatedBy: "ChatGPT", expertSkill: existsSync(xhsExpertSkill), expertSkillName: "xiaohongshu-operations-expert" });
+    if (request.method === "GET" && url.pathname === "/ai/settings") {
+      return json(response, 200, publicAISettings());
     }
-    if (request.method === "POST" && url.pathname === "/codex/run") {
+    if (request.method === "POST" && url.pathname === "/ai/settings") {
+      return json(response, 200, saveAISettings(await body(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/ai/test") {
+      return json(response, 200, await testAIConnection(await body(request)));
+    }
+    if (request.method === "GET" && url.pathname === "/ai/health") {
+      return json(response, 200, { ok: publicAISettings().configured, ...publicAISettings(), rulesBundled: Object.values(promptFiles).every(existsSync) });
+    }
+    if (request.method === "POST" && url.pathname === "/ai/run") {
       const payload = await body(request);
       if (typeof payload.prompt !== "string" || payload.prompt.length < 5 || payload.prompt.length > 250_000) return json(response, 400, { error: "分析任务内容不合法" });
-      const result = await runCodex(payload.kind, payload.prompt);
+      const result = await runAI(payload.kind, payload.prompt);
       return json(response, 200, result);
     }
-    if (request.method === "POST" && url.pathname === "/codex/cancel") {
+    if (request.method === "POST" && url.pathname === "/ai/cancel") {
       return json(response, 200, { ok: true, cancelled: cancelAnalysis() });
     }
     if (request.method === "POST" && url.pathname === "/publish-assets") {
