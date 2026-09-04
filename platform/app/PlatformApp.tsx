@@ -10,7 +10,8 @@ type CreativeDraft = { title_options: string[]; title: string; body: string; tag
 type CreativeVersion = { id: string; version_number: number; source: string; title: string; created_at: string };
 type Claim = { id: string; topic_id: string; topic_title: string; account_id: string; account_name: string; account_color: string; owner_id: string; owner_name: string; angle: string; status: string; status_label: string; title: string; body: string; tags: string[]; review_comment: string; updated_at: string; creative?: Partial<CreativeDraft>; creation_status?: string; creation_error?: string; version_number?: number; generated_at?: string; publish_images?: string[]; publish_error?: string; published_at?: string; publisher_id?: string; publisher_name?: string; publish_snapshot?: { title?: string; body?: string; tags?: string[]; approved_at?: string } | null };
 type Log = { id: string; actor_name: string; action: string; object_type: string; detail: string; created_at: string };
-type AppData = { user: User; accounts: Account[]; topics: Topic[]; claims: Claim[]; logs: Log[]; users: User[] };
+type AISettings = { configured: boolean; baseUrl: string; model: string; keySource: "environment" | "local" | "none"; busy?: boolean; unavailable?: boolean };
+type AppData = { user: User; accounts: Account[]; topics: Topic[]; claims: Claim[]; logs: Log[]; users: User[]; ai_settings: AISettings };
 type TrendSettings = { account_id?: string; target_account_id?: string; keywords: string[]; exclude_keywords: string[]; publish_time: string; sort_by: string; content_type?: "image" | "video" | "all"; last_scanned_at?: string; next_allowed_at?: string };
 type TrendSample = { id: string; feed_id: string; keyword: string; matched_keywords: string[]; title: string; author_name: string; note_type: string; source_url: string; cover_url: string; detail_text: string; original_tags: string[]; content_summary: string; sample_hooks: string[]; title_hook: string; visual_highlight: string; sample_pain_point: string; emotion_pain: string; practical_value: string; controversy_point: string; sample_structure: string[]; reusable_directions: string[]; account_adaptation: string; relevance_score: number; intent_match_score: number; account_fit_score: number; information_density_score: number; remix_value_score: number; visible_proof_score: number; reproducibility_score: number; prefilter_score: number; final_quality_score: number; quality_tier: "core" | "signal" | "excluded" | "unrated"; selection_reason: string; liked_count: string; collected_count: string; comment_count: string; shared_count: string; raw_heat_score: number; heat_score: number; published_at?: string; selection_status: string; processing_status: string; capture_outcome: string; detail_error: string; status: string; first_seen_at: string; last_seen_at: string };
 type SearchPlan = { theme: string; intent_summary: string; primary_keyword: string; intent_phrase: string; scenario_terms: string[]; keywords: string[]; exclude_keywords: string[]; publish_time: string; sort_by: string; content_type: "image" | "video" | "all"; target_account_id: string; target_account_name: string };
@@ -61,19 +62,30 @@ function fileToDataUrl(file: File) {
   });
 }
 
+function withCoverTitle(creative: CreativeDraft): CreativeDraft {
+  if (!creative.title || !creative.image_prompts.length) return creative;
+  const found = creative.image_prompts.findIndex((item) => /封面|主视觉/.test(item.label));
+  const index = found >= 0 ? found : 0;
+  const cover = { ...creative.image_prompts[index], label: "封面主视觉" };
+  const rule = `标题文字：画面必须逐字、清晰呈现“${creative.title}”，作为最高视觉层级；使用醒目的高对比中文字体，字号约占画面高度12%至18%，确保手机缩略图中仍可辨认，不得改字、漏字、使用占位符或生成乱码。`;
+  const base = cover.prompt.replace(/\n?标题文字：画面必须逐字、清晰呈现[\s\S]*$/, "").trim();
+  cover.prompt = `${base.slice(0, Math.max(0, 1180 - rule.length))}\n${rule}`.trim();
+  return { ...creative, image_prompts: [cover, ...creative.image_prompts.filter((_, itemIndex) => itemIndex !== index)] };
+}
+
 function blankCreative(claim?: Claim): CreativeDraft {
   const saved = (claim?.creative ?? {}) as Partial<CreativeDraft>;
   const currentPrompts = Array.isArray(saved.image_prompts) ? saved.image_prompts
     .map((item) => ({ label: String(item.label ?? "配图建议"), prompt: String(item.prompt ?? "") }))
     .filter((item) => item.prompt) : [];
-  return {
+  return withCoverTitle({
     title_options: Array.isArray(saved?.title_options) ? saved.title_options : [],
     title: saved?.title ?? claim?.title ?? "",
     body: saved?.body ?? claim?.body ?? "",
     tags: Array.isArray(saved?.tags) ? saved.tags : claim?.tags ?? [],
     image_prompts: currentPrompts.slice(0, 6),
     creative_note: saved?.creative_note ?? "",
-  };
+  });
 }
 
 export default function PlatformApp() {
@@ -456,19 +468,6 @@ function Topics({ data, action, busy }: { data: AppData; action: (payload: Recor
   </div>;
 }
 
-// Kept temporarily for migration comparison while existing drafts are upgraded.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function LegacyContent({ data, action, busy }: { data: AppData; action: (payload: Record<string, unknown>, success: string) => void; busy: boolean }) {
-  const mine = data.claims.filter((claim) => claim.owner_id === data.user.id || data.user.roles.includes("admin"));
-  const [selectedId, setSelectedId] = useState(mine[0]?.id ?? ""); const selected = mine.find((claim) => claim.id === selectedId) ?? mine[0];
-  const [draft, setDraft] = useState({ title: selected?.title ?? "", body: selected?.body ?? "", tags: selected?.tags.join(" ") ?? "" });
-  const [codexText, setCodexText] = useState("");
-  const prompt = selected ? `你是小红书内容编辑。请围绕选题「${selected.topic_title}」，为账号「${selected.account_name}」创作一篇图文笔记。创作角度：${selected.angle || "结合账号定位自然展开"}。请返回JSON：{"title":"标题","body":"正文","tags":["标签1","标签2"]}。不要虚构数据，不使用绝对化承诺。` : "";
-  function importCodex() { try { const parsed = JSON.parse(codexText); setDraft({ title: parsed.title || "", body: parsed.body || "", tags: Array.isArray(parsed.tags) ? parsed.tags.join(" ") : parsed.tags || "" }); action({ action: "import_codex", id: selected.id, title: parsed.title, body: parsed.body, tags: parsed.tags }, "Codex 结果已导入并保存"); setCodexText(""); } catch { alert("请粘贴 Codex 返回的标准 JSON 内容"); } }
-  if (!selected) return <section className="panel"><Empty title="还没有属于你的内容" text="先去选题中心认领一个选题。" /></section>;
-  return <div className="editor-layout"><aside className="panel editor-list"><div className="panel-head"><div><h2>我的内容</h2><p>{mine.length} 个任务</p></div></div>{mine.map((claim) => <button className={selected.id === claim.id ? "selected" : ""} onClick={() => { setSelectedId(claim.id); setDraft({ title: claim.title, body: claim.body, tags: claim.tags.join(" ") }); }} key={claim.id}><span style={{ background: claim.account_color }}>{claim.account_name.slice(0, 1)}</span><div><strong>{claim.title || claim.topic_title}</strong><small>{claim.account_name} · {claim.status_label}</small></div></button>)}</aside><section className="panel editor"><div className="editor-head"><div><span className={`status ${toneFor(selected.status)}`}>{selected.status_label}</span><h2>{selected.topic_title}</h2><p>{selected.account_name} · 负责人 {selected.owner_name}</p></div><button className="outline" onClick={() => navigator.clipboard.writeText(prompt)}>复制 Codex 提示词</button></div>{selected.review_comment ? <div className="review-note"><strong>审核意见</strong>{selected.review_comment}</div> : null}<label>笔记标题 <span>{draft.title.length}/20</span><input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} disabled={!(["writing", "revision"].includes(selected.status))} /></label><label>正文 <span>{draft.body.length} 字</span><textarea className="body-editor" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} disabled={!(["writing", "revision"].includes(selected.status))} placeholder="在这里撰写正文，或从右侧导入 Codex 结果…" /></label><label>标签<input value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} disabled={!(["writing", "revision"].includes(selected.status))} placeholder="多个标签用空格分隔" /></label><div className="editor-actions"><button className="outline" disabled={busy || !["writing", "revision"].includes(selected.status)} onClick={() => action({ action: "save_draft", id: selected.id, ...draft }, "草稿已保存")}>保存草稿</button><button className="primary" disabled={busy || !["writing", "revision"].includes(selected.status)} onClick={() => action({ action: "submit_review", id: selected.id }, "已提交审核")}>提交审核</button></div></section><aside className="panel codex-panel"><span className="section-kicker">Codex 手工模式</span><h2>AI 创作助手</h2><p>复制提示词到 Codex，生成后把 JSON 结果粘贴回来。</p><div className="prompt-box">{prompt}</div><button className="outline full" onClick={() => navigator.clipboard.writeText(prompt)}>复制提示词</button><textarea value={codexText} onChange={(e) => setCodexText(e.target.value)} placeholder={'粘贴结果：\n{"title":"...","body":"...","tags":["..."]}'} /><button className="primary full" disabled={!codexText || busy} onClick={importCodex}>导入并保存</button></aside></div>;
-}
-
 function Content({ data, action, busy, reload, notify }: { data: AppData; action: (payload: Record<string, unknown>, success: string) => void; busy: boolean; reload: () => Promise<void>; notify: (message: string) => void }) {
   const teamClaims = data.claims;
   const [selectedAccountId, setSelectedAccountId] = useState("");
@@ -610,7 +609,7 @@ function Content({ data, action, busy, reload, notify }: { data: AppData; action
         {selected.creation_error ? <div className="creation-error">上次创作失败：{selected.creation_error}</div> : null}
         {showVersions ? <div className="version-list">{versions.length ? versions.map((version) => <button key={version.id} disabled={saving} onClick={() => restoreVersion(version.version_number)}><span>v{version.version_number} · {version.source}</span><small>{version.title || "未命名"} · {dateTime(version.created_at)}</small></button>) : <p>还没有历史版本</p>}</div> : null}
         {creative.title_options.length ? <div className="title-options"><span>AI 备选标题</span><div>{creative.title_options.map((title) => <button key={title} className={creative.title === title ? "active" : ""} onClick={() => setCreative({ ...creative, title })}>{title}</button>)}</div></div> : null}
-        <label>笔记标题 <span>{creative.title.length}/20</span><input value={creative.title} onChange={(event) => setCreative({ ...creative, title: event.target.value })} disabled={!editable} placeholder="一键创作后仍可修改" /></label>
+        <label>笔记标题 <span>{creative.title.length}/20</span><input value={creative.title} onChange={(event) => setCreative(withCoverTitle({ ...creative, title: event.target.value }))} disabled={!editable} placeholder="一键创作后仍可修改" /></label>
         <label>正文 <span>{creative.body.length} 字</span><textarea className="body-editor" value={creative.body} onChange={(event) => setCreative({ ...creative, body: event.target.value })} disabled={!editable} placeholder="AI 会生成完整正文，也可以在这里手工编辑。" /></label>
         <label>标签<input value={creative.tags.join(" ")} onChange={(event) => setCreative({ ...creative, tags: event.target.value.split(/[，,\s]+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean) })} disabled={!editable} placeholder="多个标签用空格分隔" /></label>
         <div className="editor-actions"><button className="outline" disabled={!editable || saving || creating || !creative.title || !creative.body} onClick={save}>{saving ? "保存中…" : "保存图文稿"}</button><button className="primary" disabled={busy || saving || creating || !editable || !creative.title || !creative.body} onClick={saveAndSubmit}>保存并提交审核</button></div>
@@ -623,7 +622,7 @@ function Content({ data, action, busy, reload, notify }: { data: AppData; action
       {creative.image_prompts.length ? <div className="post-prompt-list">{creative.image_prompts.map((item, index) => <article className="post-prompt-card" key={index + "-" + item.label}>
         <div className="post-prompt-head"><span>图片 {index + 1}</span><button className="ghost" disabled={!item.prompt} onClick={() => void navigator.clipboard.writeText(item.prompt).then(() => notify(item.label + "提示词已复制")).catch(() => notify("复制失败，请手动选择提示词"))}>复制</button></div>
         <label>图片用途<input value={item.label} disabled={!editable} maxLength={20} onChange={(event) => updateImagePrompt(index, { label: event.target.value })} /></label>
-        <label>完整图片提示词<textarea value={item.prompt} disabled={!editable} maxLength={1200} onChange={(event) => updateImagePrompt(index, { prompt: event.target.value })} /></label>
+        <label>完整图片提示词<textarea value={item.prompt} disabled={!editable} maxLength={1200} onChange={(event) => updateImagePrompt(index, { prompt: event.target.value })} /></label>{index === 0 ? <small className="cover-title-rule">封面主视觉必须包含上方最终标题的逐字文字，并保证手机缩略图可读。</small> : null}
       </article>)}</div> : <div className="visual-empty"><span>✦</span><h3>还没有图片提示词</h3><p>点击“开始一键创作”，AI 会根据整篇内容推荐封面主视觉、核心观点图和场景配图。</p></div>}
     </aside>
   </div></div>;
@@ -746,7 +745,12 @@ function Logs({ data }: { data: AppData }) { return <section className="panel da
 
 function Settings({ data, action, busy }: { data: AppData; action: (payload: Record<string, unknown>, success: string) => void; busy: boolean }) {
   const [adding, setAdding] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState(data.ai_settings.baseUrl);
+  const [model, setModel] = useState(data.ai_settings.model);
   const isAdmin = data.user.roles.includes("admin");
+  const ai = data.ai_settings;
+  const environmentManaged = ai.keySource === "environment";
   function removeMember(member: User) {
     if (!window.confirm(`确认删除团队成员“${member.name}”吗？\n\n该成员会立即退出登录且无法再次登录；其历史创作、审核和发布记录仍会保留。`)) return;
     action({ action: "remove_user", user_id: member.id }, `已删除成员“${member.name}”并撤销其登录权限`);
@@ -757,7 +761,17 @@ function Settings({ data, action, busy }: { data: AppData; action: (payload: Rec
       {data.users.map((member) => <div className="member-row" key={member.id}><span className="avatar">{member.name.slice(0, 1)}</span><div><strong>{member.name}</strong><small>@{member.username} · {roleLabel(member.roles)}</small></div>{member.id === data.user.id ? <span className="soft-badge">当前账号</span> : <><span className="soft-badge">启用</span>{isAdmin ? <button className="danger-outline member-delete" disabled={busy} onClick={() => removeMember(member)}>删除成员</button> : null}</>}</div>)}
       <p className="helper">删除成员会立即撤销登录权限，但会保留其历史创作、审核、发布和操作记录。</p>
     </section>
-    <section className="panel settings-card"><span className="section-kicker">运行方式</span><h2>本机团队模式</h2><dl><div><dt>数据存储</dt><dd>Mac mini 本地数据库</dd></div><div><dt>AI 创作</dt><dd>内置小红书运营专家</dd></div><div><dt>图卡导出</dt><dd>浏览器本地 PNG</dd></div><div><dt>发布并发</dt><dd>最多 2 个浏览器</dd></div><div><dt>公网访问</dt><dd>关闭</dd></div></dl></section>
+    <section className="panel settings-card"><span className="section-kicker">运行方式</span><h2>本机团队模式</h2><dl><div><dt>数据存储</dt><dd>本机数据库</dd></div><div><dt>AI 创作</dt><dd>{ai.configured ? ai.model : "等待配置"}</dd></div><div><dt>创作规则</dt><dd>平台内置</dd></div><div><dt>发布并发</dt><dd>最多 2 个浏览器</dd></div><div><dt>公网访问</dt><dd>关闭</dd></div></dl></section>
+    <section className="panel settings-card ai-settings-card">
+      <div className="settings-title"><div><span className="section-kicker">AI 模型</span><h2>连接你自己的 AI 服务</h2></div><span className={`ai-connection-state ${ai.configured && !ai.unavailable ? "ready" : ""}`}>{ai.unavailable ? "运行管理器未连接" : ai.configured ? "已配置" : "待配置"}</span></div>
+      <p className="ai-settings-intro">平台通过 OpenAI 兼容接口完成爆款研究、选题拆解和内容创作。API Key 只保存在运行平台的这台主机，不会发送到团队成员的浏览器，也不会进入 Git 仓库。</p>
+      <form className="ai-settings-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); action({ action: "save_ai_settings", base_url: form.get("base_url"), model: form.get("model"), api_key: apiKey }, "AI 配置已安全保存"); setApiKey(""); }}>
+        <label>API 地址<input name="base_url" type="url" required value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} disabled={!isAdmin || environmentManaged} placeholder="https://api.openai.com/v1" /></label>
+        <label>模型名称<input name="model" required value={model} onChange={(event) => setModel(event.target.value)} disabled={!isAdmin || environmentManaged} placeholder="例如 gpt-5-mini" /></label>
+        <label>API Key<input name="api_key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} disabled={!isAdmin || environmentManaged} required={!ai.configured} autoComplete="new-password" placeholder={ai.configured ? "已保存；留空不会替换" : "仅保存到主机本地"} /></label>
+        <div className="ai-settings-actions"><small>{environmentManaged ? "当前由主机环境变量管理，页面只读。" : "测试当前输入不会保存；连接成功后再保存配置。"}</small>{isAdmin ? <><button type="button" className="outline" disabled={busy || ai.unavailable || !baseUrl || !model || (!apiKey && !ai.configured)} onClick={() => action({ action: "test_ai_settings", base_url: baseUrl, model, api_key: apiKey }, "AI 连接测试成功，当前输入尚未保存")}>测试当前输入</button><button className="primary" disabled={busy || environmentManaged || ai.unavailable}>保存配置</button></> : null}</div>
+      </form>
+    </section>
     {adding ? <div className="modal-backdrop"><form className="modal" onSubmit={(e) => { e.preventDefault(); const form = new FormData(e.currentTarget); action({ action: "create_user", name: form.get("name"), username: form.get("username"), password: form.get("password"), role: form.get("role") }, "团队成员已添加"); setAdding(false); }}><span className="section-kicker">团队账号</span><h2>添加工作人员</h2><label>姓名<input name="name" required /></label><label>用户名<input name="username" required placeholder="字母、数字、下划线" /></label><label>初始密码<input name="password" type="password" required minLength={8} /></label><label>角色<select name="role"><option value="operator">内容运营</option><option value="reviewer">审核员</option><option value="publisher">发布员</option><option value="readonly">只读成员</option></select></label><div className="modal-actions"><button type="button" className="ghost" onClick={() => setAdding(false)}>取消</button><button className="primary" disabled={busy}>创建账号</button></div></form></div> : null}
   </div>;
 }

@@ -48,15 +48,15 @@ function titleSimilarity(left: string, right: string) {
   return overlap / new Set([...leftSet, ...rightSet]).size;
 }
 
-async function codex<T>(kind: "trend-plan" | "candidate-screen" | "topic-analysis", prompt: string) {
+async function runAI<T>(kind: "trend-plan" | "candidate-screen" | "topic-analysis", prompt: string) {
   let response: Response;
   try {
-    response = await fetch("http://127.0.0.1:18100/codex/run", {
+    response = await fetch("http://127.0.0.1:18100/ai/run", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, prompt }),
     });
-  } catch { throw new Error("本机 Codex 分析服务未启动"); }
+  } catch { throw new Error("本机 AI 分析服务未启动"); }
   const payload = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(payload.error || "Codex 分析失败");
+  if (!response.ok) throw new Error(payload.error || "AI 分析失败");
   return payload;
 }
 
@@ -75,7 +75,7 @@ async function runtime(path: "acquire" | "release" | "discard" | "touch", accoun
 async function cancelRuntime(accountId?: string) {
   await Promise.allSettled([
     accountId ? runtime("discard", accountId) : Promise.resolve(),
-    fetch("http://127.0.0.1:18100/codex/cancel", { method: "POST" }),
+    fetch("http://127.0.0.1:18100/ai/cancel", { method: "POST" }),
   ]);
 }
 
@@ -201,7 +201,7 @@ export async function POST(request: Request) {
     const history = await db.prepare(`SELECT DISTINCT t.title FROM claims c JOIN topics t ON t.id=c.topic_id WHERE c.account_id=? ORDER BY c.updated_at DESC LIMIT 30`)
       .bind(target.id).all<{ title: string }>();
     let plan: { theme: string; intent_summary: string; primary_keyword: string; intent_phrase: string; scenario_terms: string[]; publish_time: string; sort_by: string; content_type: "image" | "video" | "all"; keywords: string[]; exclude_keywords: string[] };
-    try { plan = await codex("trend-plan", `
+    try { plan = await runAI("trend-plan", `
 你是小红书趋势研究任务规划器。把用户的一句话需求转换为一次克制、可执行的站内搜索计划。
 只解释用户意图，不执行搜索，不编造平台数据。
 目标内容账号：${target.name}
@@ -220,9 +220,9 @@ export async function POST(request: Request) {
 4. “最近一周”对应一周内；“最火/爆款/热门”默认最多点赞；没有时间时默认一周内。
 5. 明确只要视频时 content_type=video；明确同时需要图文和视频时为 all；出现“不要视频/只要图文/图片笔记”，或没有说明内容类型时，一律为 image。
 用户请求：${requestText}
-`); } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Codex 无法理解任务" }, { status: 502 }); }
+`); } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "AI 无法理解任务" }, { status: 502 }); }
     const keywords = cleanList(plan.keywords, 3, 6);
-    if (keywords.length < 3) return Response.json({ error: "Codex 没有生成足够的有效搜索关键词" }, { status: 502 });
+    if (keywords.length < 3) return Response.json({ error: "AI 没有生成足够的有效搜索关键词" }, { status: 502 });
     const publishTime = ["一天内", "一周内", "半年内"].includes(plan.publish_time) ? plan.publish_time : "一周内";
     const sortBy = ["综合", "最新", "最多点赞", "最多评论", "最多收藏"].includes(plan.sort_by) ? plan.sort_by : "最多点赞";
     const contentType = ["image", "video", "all"].includes(plan.content_type) ? plan.content_type : "image";
@@ -297,7 +297,7 @@ export async function POST(request: Request) {
     if (!account) return Response.json({ error: "主采集账号记录不存在" }, { status: 409 });
     if (!account.xhs_user_id) return Response.json({ error: `${account.name} 尚未完成首次扫码和唯一身份绑定` }, { status: 409 });
     const recoverable = await db.prepare(`SELECT id,keywords,completed_keywords FROM trend_scans
-      WHERE target_account_id=? AND request_text=? AND status='failed' AND error='Codex 分析格式未配置'
+      WHERE target_account_id=? AND request_text=? AND status='failed' AND error IN ('Codex 分析格式未配置','AI 结构化输出格式未配置')
       ORDER BY started_at DESC LIMIT 1`).bind(targetAccount.id, requestText).first<{ id: string; keywords: string; completed_keywords: string }>();
     if (recoverable) {
       const savedKeywords = parseList(recoverable.keywords);
@@ -473,7 +473,7 @@ export async function POST(request: Request) {
     }));
     let screen: { overview: string; candidates: Array<{ feed_id: string; relevance_score: number; intent_match_score: number; account_fit_score: number; semantic_noise: boolean; reason: string }> };
     try {
-      screen = await codex("candidate-screen", `
+      screen = await runAI("candidate-screen", `
 你是小红书候选样本初筛员。只根据标题、命中关键词和任务上下文做低成本语义初筛，不推测正文，不评价是否爆款。
 用户任务：${(scan as Scan & { request_text?: string }).request_text || ""}
 关键词计划：${JSON.stringify(keywordPlan)}
@@ -614,7 +614,7 @@ export async function POST(request: Request) {
       detail: String(sample.detail_text || "").slice(0, 2500),
     }));
     let analysis: { overview: string; sample_analyses: Array<{ feed_id: string; summary: string; hook_points: string[]; title_hook: string; visual_highlight: string; pain_point: string; practical_value: string; controversy_point: string; content_structure: string[]; reusable_directions: string[]; account_adaptation: string; is_relevant: boolean; relevance_score: number; information_density_score: number; remix_value_score: number; account_fit_score: number; visible_proof_score: number; reproducibility_score: number; selection_reason: string }> };
-    try { analysis = await codex("topic-analysis", `
+    try { analysis = await runAI("topic-analysis", `
 你是小红书样本研究员。根据真实搜索样本逐条完成摘要、爆点拆解和质量分层，不生成团队选题。
 用户原始任务：${scan.request_text || scan.theme}
 目标账号资料：${JSON.stringify({ ...targetAccount, content_pillars: parseList(String(targetAccount.content_pillars || "[]")), strategy_keywords: parseList(String(targetAccount.strategy_keywords || "[]")), excluded_topics: parseList(String(targetAccount.excluded_topics || "[]")) })}
@@ -636,7 +636,7 @@ ${JSON.stringify(samplePayload)}
 `); } catch (error) {
       const cancelled = await db.prepare("SELECT status FROM trend_scans WHERE id=?").bind(scan.id).first<{ status: string }>();
       if (cancelled?.status === "cancelled") return Response.json({ error: "任务已停止" }, { status: 409 });
-      return Response.json({ error: error instanceof Error ? error.message : "Codex 选题拆解失败" }, { status: 502 });
+      return Response.json({ error: error instanceof Error ? error.message : "AI 选题拆解失败" }, { status: 502 });
     }
     const currentScan = await db.prepare("SELECT status FROM trend_scans WHERE id=?").bind(scan.id).first<{ status: string }>();
     if (currentScan?.status === "cancelled") return Response.json({ error: "任务已停止，AI 结果未写入" }, { status: 409 });
