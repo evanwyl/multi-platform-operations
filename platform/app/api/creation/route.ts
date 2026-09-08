@@ -1,5 +1,7 @@
-import { currentUser } from "../../../lib/auth";
+import { currentUser, rejectCrossSiteMutation } from "../../../lib/auth";
 import { audit, database, ensureDatabase, type DbUser } from "../../../lib/database";
+import { can, forbidden, roleGroups } from "../../../lib/permissions";
+import { managerFetch } from "../../../lib/runtime-client";
 
 type ImagePrompt = { label: string; prompt: string };
 
@@ -93,14 +95,18 @@ async function sourceReferences(claim: ClaimContext) {
   return references;
 }
 
-function canEdit(user: DbUser, claim: ClaimContext) {
+function canView(user: DbUser, claim: ClaimContext) {
   return Boolean(user.id && claim.id);
+}
+
+function canEdit(user: DbUser, claim: ClaimContext) {
+  return canView(user, claim) && can(user, roleGroups.operate);
 }
 
 async function runAI<T>(kind: "content-draft", prompt: string) {
   let response: Response;
   try {
-    response = await fetch("http://127.0.0.1:18100/ai/run", {
+    response = await managerFetch("/ai/run", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, prompt }),
     });
   } catch { throw new Error("本机 AI 创作服务未启动"); }
@@ -133,7 +139,7 @@ export async function GET(request: Request) {
   const id = new URL(request.url).searchParams.get("id") || "";
   const claim = await claimContext(id);
   if (!claim) return Response.json({ error: "内容任务不存在" }, { status: 404 });
-  if (!canEdit(user, claim)) return Response.json({ error: "当前账号无法查看这个团队任务" }, { status: 403 });
+  if (!canView(user, claim)) return Response.json({ error: "当前账号无法查看这个团队任务" }, { status: 403 });
   const versions = await database().prepare(`SELECT id,version_number,source,title,created_at FROM claim_versions
     WHERE claim_id=? ORDER BY version_number DESC LIMIT 20`).bind(id).all();
   return Response.json({ creative: parseJson(claim.creative_json, {}), versions: versions.results });
@@ -141,8 +147,11 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   await ensureDatabase();
+  const crossSite = rejectCrossSiteMutation(request);
+  if (crossSite) return crossSite;
   let user: DbUser;
   try { user = await requireUser(request); } catch (response) { return response as Response; }
+  if (!can(user, roleGroups.operate)) return forbidden("只有管理员或内容运营可以编辑内容");
   const data = await request.json() as Record<string, unknown>;
   const action = String(data.action ?? "");
   const id = String(data.id ?? "");

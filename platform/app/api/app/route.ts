@@ -1,5 +1,7 @@
-import { createPasswordHash, currentUser, publicUser } from "../../../lib/auth";
+import { createPasswordHash, currentUser, publicUser, rejectCrossSiteMutation } from "../../../lib/auth";
 import { audit, database, ensureDatabase } from "../../../lib/database";
+import { can, forbidden, roleGroups } from "../../../lib/permissions";
+import { managerFetch } from "../../../lib/runtime-client";
 
 const statusLabels: Record<string, string> = {
   writing: "创作中", review: "待审核", revision: "待修改", approved: "待发布",
@@ -23,10 +25,11 @@ function parseTextList(value: unknown) {
 }
 
 type AISettings = { configured: boolean; baseUrl: string; model: string; keySource: string; busy?: boolean; unavailable?: boolean };
+type DbRow = Record<string, string | number | null>;
 
 async function runtimeAI(path: "settings" | "test", options?: RequestInit) {
   let response: Response;
-  try { response = await fetch(`http://127.0.0.1:18100/ai/${path}`, options); }
+  try { response = await managerFetch(`/ai/${path}`, options); }
   catch { throw new Error("本机 AI 运行管理器未启动"); }
   const payload = await response.json() as AISettings & { error?: string };
   if (!response.ok) throw new Error(payload.error || "AI 配置操作失败");
@@ -39,7 +42,7 @@ export async function GET(request: Request) {
   try { user = await requireUser(request); } catch (response) { return response as Response; }
   const db = database();
   const [accounts, topics, claims, logs, users, aiSettings] = await Promise.all([
-    db.prepare("SELECT * FROM accounts WHERE is_demo=0 ORDER BY updated_at, rowid").all(),
+    db.prepare("SELECT * FROM accounts WHERE is_demo=0 ORDER BY updated_at, rowid").all<DbRow>(),
     db.prepare(`SELECT t.*,u.name AS creator_name,i.brief,i.target_audience,i.pain_point,i.hook_points,i.content_structure,
       i.why_it_works,i.account_fit,i.source_feed_ids,i.score,
       COALESCE(s.source_url,t.source_url) AS source_url,s.author_name AS source_author,s.keyword AS source_keyword,
@@ -53,14 +56,14 @@ export async function GET(request: Request) {
       LEFT JOIN trend_samples s ON s.feed_id=json_extract(i.source_feed_ids,'$[0]') OR (i.topic_id IS NULL AND s.source_url=t.source_url)
       LEFT JOIN claims latest_claim ON latest_claim.id=(SELECT c.id FROM claims c WHERE c.topic_id=t.id ORDER BY c.updated_at DESC LIMIT 1)
       LEFT JOIN users claim_owner ON claim_owner.id=latest_claim.owner_id
-      WHERE t.archived_at IS NULL ORDER BY t.created_at DESC`).all(),
+      WHERE t.archived_at IS NULL ORDER BY t.created_at DESC`).all<DbRow>(),
     db.prepare(`SELECT c.*,t.title AS topic_title,a.name AS account_name,a.color AS account_color,u.name AS owner_name,
       publisher.name AS publisher_name
       FROM claims c JOIN topics t ON t.id=c.topic_id JOIN accounts a ON a.id=c.account_id JOIN users u ON u.id=c.owner_id
       LEFT JOIN users publisher ON publisher.id=c.publisher_id
-      WHERE a.is_demo=0 ORDER BY c.updated_at DESC`).all(),
-    db.prepare("SELECT l.*,u.name AS actor_name FROM audit_logs l JOIN users u ON u.id=l.actor_id ORDER BY l.created_at DESC LIMIT 50").all(),
-    db.prepare("SELECT id,name,username,roles,status,created_at FROM users WHERE status='active' ORDER BY created_at").all(),
+      WHERE a.is_demo=0 ORDER BY c.updated_at DESC`).all<DbRow>(),
+    db.prepare("SELECT l.*,u.name AS actor_name FROM audit_logs l JOIN users u ON u.id=l.actor_id ORDER BY l.created_at DESC LIMIT 50").all<DbRow>(),
+    db.prepare("SELECT id,name,username,roles,status,created_at FROM users WHERE status='active' ORDER BY created_at").all<DbRow>(),
     runtimeAI("settings").catch(() => ({ configured: false, baseUrl: "https://api.openai.com/v1", model: "gpt-5-mini", keySource: "none", unavailable: true })),
   ]);
   return Response.json({
@@ -78,6 +81,7 @@ export async function GET(request: Request) {
     claims: claims.results.map((claim) => ({
       ...claim,
       status_label: statusLabels[String(claim.status)] ?? claim.status,
+      publish_recoverable: claim.status === "publishing" && Date.now() - Date.parse(String(claim.updated_at)) >= 8 * 60 * 1000,
       tags: JSON.parse(String(claim.tags || "[]")),
       creative: JSON.parse(String(claim.creative_json || "{}")),
       publish_images: JSON.parse(String(claim.publish_images || "[]")),
@@ -89,6 +93,8 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   await ensureDatabase();
+  const crossSite = rejectCrossSiteMutation(request);
+  if (crossSite) return crossSite;
   let user;
   try { user = await requireUser(request); } catch (response) { return response as Response; }
   const db = database();
@@ -186,6 +192,7 @@ export async function POST(request: Request) {
   }
 
   if (action === "create_topic") {
+    if (!can(user, roleGroups.operate)) return forbidden("只有管理员或内容运营可以创建选题");
     const title = String(data.title ?? "").trim();
     if (!title) return Response.json({ error: "请输入选题标题" }, { status: 400 });
     const id = crypto.randomUUID();
@@ -196,6 +203,7 @@ export async function POST(request: Request) {
   }
 
   if (action === "archive_topics_bulk") {
+    if (!can(user, roleGroups.operate)) return forbidden("只有管理员或内容运营可以删除选题");
     const topicIds = [...new Set((Array.isArray(data.topic_ids) ? data.topic_ids : []).map(String).filter(Boolean))].slice(0, 200);
     if (!topicIds.length) return Response.json({ error: "请选择要删除的选题" }, { status: 400 });
     const placeholders = topicIds.map(() => "?").join(",");
@@ -208,6 +216,7 @@ export async function POST(request: Request) {
   }
 
   if (action === "claim_topic") {
+    if (!can(user, roleGroups.operate)) return forbidden("只有管理员或内容运营可以认领选题");
     const topicId = String(data.topic_id ?? "");
     const accountId = String(data.account_id ?? "");
     if (!topicId || !accountId) return Response.json({ error: "请选择选题和账号" }, { status: 400 });
@@ -230,6 +239,7 @@ export async function POST(request: Request) {
   }
 
   if (action === "save_draft") {
+    if (!can(user, roleGroups.operate)) return forbidden("只有管理员或内容运营可以保存草稿");
     const id = String(data.id ?? "");
     const claim = await db.prepare("SELECT owner_id,status FROM claims WHERE id=?").bind(id).first<{ owner_id: string; status: string }>();
     if (!claim) return Response.json({ error: "内容任务不存在" }, { status: 404 });
@@ -241,6 +251,7 @@ export async function POST(request: Request) {
   }
 
   if (action === "submit_review") {
+    if (!can(user, roleGroups.operate)) return forbidden("只有管理员或内容运营可以提交审核");
     const id = String(data.id ?? "");
     const claim = await db.prepare("SELECT owner_id,title,body FROM claims WHERE id=?").bind(id).first<{ owner_id: string; title: string; body: string }>();
     if (!claim) return Response.json({ error: "内容任务不存在" }, { status: 404 });
@@ -251,8 +262,7 @@ export async function POST(request: Request) {
   }
 
   if (action === "review") {
-    const roles = JSON.parse(user.roles) as string[];
-    if (!roles.some((role) => ["admin", "reviewer"].includes(role))) return Response.json({ error: "你没有审核权限" }, { status: 403 });
+    if (!can(user, roleGroups.review)) return forbidden("你没有审核权限");
     const id = String(data.id ?? "");
     const result = data.result === "approve" ? "approved" : "revision";
     const comment = String(data.comment ?? "").trim();
@@ -274,8 +284,7 @@ export async function POST(request: Request) {
   }
 
   if (action === "queue_publish") {
-    const roles = JSON.parse(user.roles) as string[];
-    if (!roles.some((role) => ["admin", "publisher", "reviewer"].includes(role))) return Response.json({ error: "你没有发布权限" }, { status: 403 });
+    if (!can(user, [...roleGroups.review, "publisher"])) return forbidden("你没有转入发布队列的权限");
     const id = String(data.id ?? "");
     const claim = await db.prepare("SELECT status FROM claims WHERE id=?").bind(id).first<{ status: string }>();
     if (!claim || claim.status !== "approved") return Response.json({ error: "只有审核通过的内容才能排队" }, { status: 409 });

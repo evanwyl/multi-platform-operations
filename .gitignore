@@ -20,6 +20,7 @@ platform/runtime/accounts/
 platform/runtime/logs/
 platform/runtime/publish-assets/
 platform/runtime/config/
+platform/runtime/bin/
 platform/public/generated/
 
 # Dependencies, builds and local tool state
@@ -31,3 +32,5 @@ platform/.wrangler/
 platform/coverage/
 platform/outputs/
 platform/work/
+platform/backups/
+platform/restore-rollback-*/

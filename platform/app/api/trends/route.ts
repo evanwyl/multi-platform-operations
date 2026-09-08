@@ -1,6 +1,8 @@
-import { currentUser } from "../../../lib/auth";
+import { currentUser, rejectCrossSiteMutation } from "../../../lib/auth";
 import { audit, database, ensureDatabase } from "../../../lib/database";
 import { callMcpTool } from "../../../lib/xhs-mcp";
+import { can, forbidden, roleGroups } from "../../../lib/permissions";
+import { managerFetch } from "../../../lib/runtime-client";
 
 type Settings = {
   account_id: string | null; target_account_id: string | null; keywords: string; exclude_keywords: string;
@@ -16,6 +18,7 @@ type Feed = {
     cover?: { url?: string; urlPre?: string; urlDefault?: string; infoList?: Array<{ url?: string }> };
   };
 };
+type DbRow = Record<string, string | number | null>;
 
 function roles(user: { roles: string }) { return JSON.parse(user.roles) as string[]; }
 function parseList(value: string) { try { const data = JSON.parse(value); return Array.isArray(data) ? data.map(String) : []; } catch { return []; } }
@@ -51,7 +54,7 @@ function titleSimilarity(left: string, right: string) {
 async function runAI<T>(kind: "trend-plan" | "candidate-screen" | "topic-analysis", prompt: string) {
   let response: Response;
   try {
-    response = await fetch("http://127.0.0.1:18100/ai/run", {
+    response = await managerFetch("/ai/run", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, prompt }),
     });
   } catch { throw new Error("本机 AI 分析服务未启动"); }
@@ -63,7 +66,7 @@ async function runAI<T>(kind: "trend-plan" | "candidate-screen" | "topic-analysi
 async function runtime(path: "acquire" | "release" | "discard" | "touch", accountId: string) {
   let response: Response;
   try {
-    response = await fetch(`http://127.0.0.1:18100/${path}`, {
+    response = await managerFetch(`/${path}`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ accountId }),
     });
   } catch { throw new Error("小红书运行管理器未启动"); }
@@ -75,7 +78,7 @@ async function runtime(path: "acquire" | "release" | "discard" | "touch", accoun
 async function cancelRuntime(accountId?: string) {
   await Promise.allSettled([
     accountId ? runtime("discard", accountId) : Promise.resolve(),
-    fetch("http://127.0.0.1:18100/ai/cancel", { method: "POST" }),
+    managerFetch("/ai/cancel", { method: "POST" }),
   ]);
 }
 
@@ -153,9 +156,9 @@ export async function GET(request: Request) {
       content_summary,sample_hooks,sample_pain_point,sample_structure,title_hook,visual_highlight,emotion_pain,practical_value,controversy_point,reusable_directions,account_adaptation,relevance_score,information_density_score,remix_value_score,selection_reason,
       intent_match_score,account_fit_score,prefilter_score,visible_proof_score,reproducibility_score,final_quality_score,quality_tier,
       liked_count,collected_count,comment_count,shared_count,raw_heat_score,heat_score,published_at,selection_status,processing_status,capture_outcome,detail_error,status,first_seen_at,last_seen_at
-      FROM trend_samples WHERE status!='archived' ORDER BY CASE status WHEN 'new' THEN 0 WHEN 'used' THEN 1 ELSE 2 END,last_seen_at DESC LIMIT 200`).all(),
-    db.prepare("SELECT * FROM trend_scans ORDER BY started_at DESC LIMIT 10").all(),
-    db.prepare("SELECT id,name,status,xhs_user_id,xhs_nickname,persona,audience,profile_bio,content_pillars,strategy_keywords,excluded_topics FROM accounts WHERE is_demo=0 ORDER BY updated_at").all(),
+      FROM trend_samples WHERE status!='archived' ORDER BY CASE status WHEN 'new' THEN 0 WHEN 'used' THEN 1 ELSE 2 END,last_seen_at DESC LIMIT 200`).all<DbRow>(),
+    db.prepare("SELECT * FROM trend_scans ORDER BY started_at DESC LIMIT 10").all<DbRow>(),
+    db.prepare("SELECT id,name,status,xhs_user_id,xhs_nickname,persona,audience,profile_bio,content_pillars,strategy_keywords,excluded_topics FROM accounts WHERE is_demo=0 ORDER BY updated_at").all<DbRow>(),
   ]);
   const contentType = settings?.content_type || "image";
   const visibleSamples = samples.results.filter((sample) => contentType === "all" || (contentType === "video" ? sample.note_type === "video" : sample.note_type === "normal"));
@@ -176,11 +179,16 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   await ensureDatabase();
+  const crossSite = rejectCrossSiteMutation(request);
+  if (crossSite) return crossSite;
   const user = await currentUser(request);
   if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
   const db = database();
   const data = await request.json() as Record<string, unknown>;
   const action = String(data.action ?? "");
+  if (action !== "save_settings" && !can(user, roleGroups.operate)) {
+    return forbidden("只有管理员或内容运营可以执行选题研究操作");
+  }
   const now = new Date();
   const nowIso = now.toISOString();
 
@@ -458,7 +466,7 @@ export async function POST(request: Request) {
     const finishedAt = new Date();
     const nextAllowed = new Date(finishedAt.getTime() + 24 * 60 * 60 * 1000).toISOString();
     const scanSamples = await db.prepare(`SELECT id,feed_id,title,keyword,matched_keywords,liked_count,collected_count,comment_count,detail_text,processing_status,status
-      FROM trend_samples WHERE last_seen_at>=? AND status!='archived'`).bind((scan as Scan & { started_at: string }).started_at).all();
+      FROM trend_samples WHERE last_seen_at>=? AND status!='archived'`).bind((scan as Scan & { started_at: string }).started_at).all<DbRow>();
     const engagements = scanSamples.results.map((sample) => metricValue(sample.liked_count) + metricValue(sample.collected_count) * 1.5 + metricValue(sample.comment_count) * 2);
     const maxEngagement = Math.max(1, ...engagements);
     const heatScores = engagements.map((engagement) => Math.round(100 * Math.log1p(engagement) / Math.log1p(maxEngagement)));
@@ -600,7 +608,7 @@ export async function POST(request: Request) {
     if (scan.status === "analyzed") return Response.json({ reused: true, overview: scan.analysis_overview });
     const samples = await db.prepare(`SELECT feed_id,keyword,matched_keywords,title,author_name,liked_count,collected_count,comment_count,shared_count,raw_heat_score,heat_score,detail_text,original_tags,cover_url,processing_status,
       intent_match_score,account_fit_score,prefilter_score
-      FROM trend_samples WHERE last_seen_at>=? AND status!='archived' AND selection_status='selected' AND processing_status='success' AND detail_text!='' ORDER BY prefilter_score DESC,heat_score DESC,last_seen_at DESC LIMIT 24`).bind(scan.started_at).all();
+      FROM trend_samples WHERE last_seen_at>=? AND status!='archived' AND selection_status='selected' AND processing_status='success' AND detail_text!='' ORDER BY prefilter_score DESC,heat_score DESC,last_seen_at DESC LIMIT 24`).bind(scan.started_at).all<DbRow>();
     if (samples.results.length < 3) return Response.json({ error: "正文获取成功的爆款样本不足3条，已停止AI拆解和自动转入，请先补抓详情" }, { status: 409 });
     const targetAccount = await db.prepare(`SELECT name,persona,audience,profile_bio,content_pillars,strategy_keywords,excluded_topics FROM accounts WHERE id=? AND is_demo=0`)
       .bind(scan.target_account_id).first<Account>();

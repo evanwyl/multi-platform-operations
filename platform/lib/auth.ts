@@ -1,6 +1,8 @@
 import { database, ensureDatabase, type DbUser } from "./database";
+import { env } from "cloudflare:workers";
 
 const SESSION_COOKIE = "hongshutai_session";
+const DEVICE_COOKIE = "hongshutai_device";
 const encoder = new TextEncoder();
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -26,10 +28,16 @@ export async function verifyPassword(password: string, stored: string) {
   if (!iterationsText || !saltText || !expected) return false;
   const normalized = saltText.replaceAll("-", "+").replaceAll("_", "/");
   const decoded = atob(normalized + "=".repeat((4 - normalized.length % 4) % 4));
+  const iterations = Number(iterationsText);
+  if (!Number.isInteger(iterations) || iterations < 100_000 || iterations > 1_000_000) return false;
   const salt = Uint8Array.from(decoded, (char) => char.charCodeAt(0));
   const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: Number(iterationsText) }, key, 256);
-  return bytesToBase64(new Uint8Array(bits)) === expected;
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, 256);
+  const actual = bytesToBase64(new Uint8Array(bits));
+  if (actual.length !== expected.length) return false;
+  let difference = 0;
+  for (let index = 0; index < actual.length; index += 1) difference |= actual.charCodeAt(index) ^ expected.charCodeAt(index);
+  return difference === 0;
 }
 
 function cookieValue(request: Request, name: string) {
@@ -41,8 +49,20 @@ function cookieValue(request: Request, name: string) {
   return null;
 }
 
+export function deviceAuthorized(request: Request) {
+  const runtime = env as unknown as Record<string, string | undefined>;
+  if (runtime.TEAM_MODE !== "host") return true;
+  const expected = runtime.TEAM_ACCESS_TOKEN ?? "";
+  const actual = cookieValue(request, DEVICE_COOKIE) ?? "";
+  if (!expected || actual.length !== expected.length) return false;
+  let difference = 0;
+  for (let index = 0; index < actual.length; index += 1) difference |= actual.charCodeAt(index) ^ expected.charCodeAt(index);
+  return difference === 0;
+}
+
 export async function currentUser(request: Request): Promise<DbUser | null> {
   await ensureDatabase();
+  if (!deviceAuthorized(request)) return null;
   const token = cookieValue(request, SESSION_COOKIE);
   if (!token) return null;
   const tokenHash = await digest(token);
@@ -53,18 +73,32 @@ export async function currentUser(request: Request): Promise<DbUser | null> {
   return user ?? null;
 }
 
-export async function createSession(userId: string) {
+export async function createSession(userId: string, request?: Request) {
   const token = bytesToBase64(crypto.getRandomValues(new Uint8Array(32)));
   const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   await database().prepare("INSERT INTO sessions (token_hash,user_id,expires_at,created_at) VALUES (?,?,?,?)")
     .bind(await digest(token), userId, expires.toISOString(), new Date().toISOString()).run();
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`;
+  await database().prepare("DELETE FROM sessions WHERE expires_at<=?").bind(new Date().toISOString()).run();
+  const secure = request && new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800${secure}`;
 }
 
 export async function destroySession(request: Request) {
   const token = cookieValue(request, SESSION_COOKIE);
   if (token) await database().prepare("DELETE FROM sessions WHERE token_hash=?").bind(await digest(token)).run();
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure}`;
+}
+
+export function rejectCrossSiteMutation(request: Request) {
+  const fetchSite = request.headers.get("sec-fetch-site");
+  if (fetchSite === "cross-site") return Response.json({ error: "已拒绝跨站请求" }, { status: 403 });
+  const origin = request.headers.get("origin");
+  if (!origin) return null;
+  try {
+    if (new URL(origin).origin === new URL(request.url).origin) return null;
+  } catch { void 0; }
+  return Response.json({ error: "请求来源不可信" }, { status: 403 });
 }
 
 export function publicUser(user: DbUser) {
