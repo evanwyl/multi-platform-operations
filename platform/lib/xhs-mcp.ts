@@ -1,3 +1,5 @@
+import { protectedHeaders } from "./runtime-client";
+
 export type McpContent = { type: string; text?: string; data?: string; mimeType?: string };
 
 function friendlyError(message: string) {
@@ -8,7 +10,7 @@ function friendlyError(message: string) {
 
 export async function callMcpTool(port: number, name: string, args: Record<string, unknown> = {}, timeoutMs?: number) {
   const endpoint = `http://127.0.0.1:${port}/mcp`;
-  const commonHeaders = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+  const commonHeaders = protectedHeaders({ "content-type": "application/json", accept: "application/json, text/event-stream" });
   const signal = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
   let initialize: Response;
   try {
@@ -26,7 +28,7 @@ export async function callMcpTool(port: number, name: string, args: Record<strin
   let response: Response;
   try {
     response = await fetch(endpoint, {
-      method: "POST", headers: { ...commonHeaders, "mcp-session-id": sessionId }, signal,
+      method: "POST", headers: protectedHeaders({ "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-session-id": sessionId }), signal,
       body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: args } }),
     });
   } catch (error) {

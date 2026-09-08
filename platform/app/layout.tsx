@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "./brand-system.css";
+import "./product-theme.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "红薯台｜小红书内容运营中台",
-  description: "本机部署的小红书多账号内容运营、审核与发布平台。",
+  title: "红薯台｜多平台内容运营中台",
+  description: "本机部署的多平台内容运营、审核与发布工作台。",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

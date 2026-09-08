@@ -262,7 +262,7 @@ h1 {
 
 .panel,
 .alert-card,
-.metrics article,
+.metrics .metric-card,
 .sample-card,
 .publish-card,
 .review-card {
@@ -415,15 +415,19 @@ h1 {
   background: var(--brand-white);
 }
 
-.metrics article {
+.metrics .metric-card {
   min-height: 90px;
   padding: 17px 15px;
   border: 0;
   border-right: 1px solid var(--line);
   border-radius: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.metrics article:last-child {
+.metrics .metric-card:last-child {
   border-right: 0;
 }
 
@@ -963,11 +967,11 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .metrics article:nth-child(2) {
+  .metrics .metric-card:nth-child(2) {
     border-right: 0;
   }
 
-  .metrics article:nth-child(-n + 2) {
+  .metrics .metric-card:nth-child(-n + 2) {
     border-bottom: 1px solid var(--line);
   }
 
@@ -1062,7 +1066,7 @@ h1 {
     gap: 9px;
   }
 
-  .metrics article {
+  .metrics .metric-card {
     min-width: 0;
   }
 
@@ -1449,9 +1453,25 @@ body {
   position: relative;
   min-height: 110px;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 14px;
   border: 1px solid var(--line);
   border-radius: 14px;
   box-shadow: 0 9px 26px rgb(19 41 75 / 6%);
+  transition: transform .16s ease, box-shadow .16s ease, filter .16s ease;
+}
+
+.metrics .metric-card:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.02);
+  box-shadow: 0 13px 30px rgb(19 41 75 / 11%);
+}
+
+.metrics .metric-card:focus-visible,
+.task-row:focus-visible {
+  outline: 3px solid rgb(0 110 255 / 28%);
+  outline-offset: 2px;
 }
 
 .metrics .metric-card::after {
@@ -1556,7 +1576,13 @@ body {
 
 .task-row {
   position: relative;
+  width: 100%;
   padding-left: 26px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .task-row::before {

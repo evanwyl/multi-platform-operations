@@ -1,42 +1,64 @@
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 const HOST = "127.0.0.1";
-const MANAGER_PORT = 18100;
+const MANAGER_PORT = Number(process.env.MANAGER_PORT || 18100);
 const SLOT_PORTS = [18061, 18062];
 const VERIFICATION_PORT = 18063;
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 const VERIFICATION_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const HEADED_BROWSER = true;
-const root = resolve(process.cwd(), "runtime/accounts");
-const analysisRoot = resolve(process.cwd(), "runtime/analysis");
-const publishAssetRoot = resolve(process.cwd(), "runtime/publish-assets");
-const trendCoverRoot = resolve(process.cwd(), "public/trend-covers");
-const configRoot = resolve(process.cwd(), "runtime/config");
+const managerToken = String(process.env.RUNTIME_MANAGER_TOKEN || "").trim();
+const appRoot = resolve(process.env.HONGSHUTAI_APP_ROOT || process.cwd());
+const dataRoot = resolve(process.env.HONGSHUTAI_DATA_ROOT || process.cwd());
+const root = resolve(dataRoot, "runtime/accounts");
+const analysisRoot = resolve(dataRoot, "runtime/analysis");
+const publishAssetRoot = resolve(dataRoot, "runtime/publish-assets");
+const trendCoverRoot = resolve(dataRoot, "runtime/trend-covers");
+const configRoot = resolve(dataRoot, "runtime/config");
 const aiConfigPath = join(configRoot, "ai.json");
-const bundledXhsBinary = resolve(process.cwd(), "runtime/bin/xiaohongshu-mcp-darwin-arm64");
+const bundledXhsBinary = resolve(appRoot, "runtime/bin/xiaohongshu-mcp-darwin-arm64");
 const legacyXhsBinary = join(homedir(), ".hermes/services/xiaohongshu-mcp/bin/xiaohongshu-mcp-darwin-arm64");
 const binary = process.env.XHS_MCP_BINARY || (existsSync(bundledXhsBinary) ? bundledXhsBinary : legacyXhsBinary);
 const promptFiles = {
-  research: resolve(process.cwd(), "runtime/prompts/research-system.md"),
-  content: resolve(process.cwd(), "runtime/prompts/content-system.md"),
-  humanizer: resolve(process.cwd(), "runtime/prompts/humanizer-system.md"),
+  research: resolve(appRoot, "runtime/prompts/research-system.md"),
+  content: resolve(appRoot, "runtime/prompts/content-system.md"),
+  humanizer: resolve(appRoot, "runtime/prompts/humanizer-system.md"),
 };
 const analysisSchemas = {
-  "trend-plan": resolve(process.cwd(), "runtime/trend-plan.schema.json"),
-  "candidate-screen": resolve(process.cwd(), "runtime/candidate-screen.schema.json"),
-  "topic-analysis": resolve(process.cwd(), "runtime/topic-analysis.schema.json"),
-  "content-draft": resolve(process.cwd(), "runtime/content-draft.schema.json"),
+  "trend-plan": resolve(appRoot, "runtime/trend-plan.schema.json"),
+  "candidate-screen": resolve(appRoot, "runtime/candidate-screen.schema.json"),
+  "topic-analysis": resolve(appRoot, "runtime/topic-analysis.schema.json"),
+  "content-draft": resolve(appRoot, "runtime/content-draft.schema.json"),
 };
+
+process.umask(0o077);
+if (managerToken.length < 32) {
+  process.stderr.write("本机运行管理器缺少安全访问令牌。请使用 npm run dev 或 npm start 启动平台。\n");
+  process.exit(1);
+}
 
 mkdirSync(root, { recursive: true });
 mkdirSync(analysisRoot, { recursive: true });
 mkdirSync(publishAssetRoot, { recursive: true });
 mkdirSync(trendCoverRoot, { recursive: true });
 mkdirSync(configRoot, { recursive: true });
+for (const directory of [root, analysisRoot, publishAssetRoot, trendCoverRoot, configRoot]) chmodSync(directory, 0o700);
+for (const entry of readdirSync(root, { withFileTypes: true })) {
+  if (!entry.isDirectory()) continue;
+  const accountRoot = join(root, entry.name);
+  chmodSync(accountRoot, 0o700);
+  for (const child of ["config", "logs"]) {
+    const directory = join(accountRoot, child);
+    if (existsSync(directory)) chmodSync(directory, 0o700);
+  }
+  const cookies = join(accountRoot, "cookies.json");
+  if (existsSync(cookies)) chmodSync(cookies, 0o600);
+}
 if (!existsSync(binary)) {
   process.stderr.write(`找不到小红书 MCP。请设置 XHS_MCP_BINARY，或把可执行文件放到：${bundledXhsBinary}\n`);
   process.exit(1);
@@ -150,7 +172,8 @@ async function cacheTrendCover(feedId, sourceUrl) {
     throw Object.assign(new Error("头图地址或笔记标识不合法"), { status: 400 });
   }
   for (const extension of ["jpg", "png", "webp", "avif"]) {
-    if (existsSync(join(trendCoverRoot, `${feedId}.${extension}`))) return `/trend-covers/${feedId}.${extension}`;
+    const filename = `${feedId}.${extension}`;
+    if (existsSync(join(trendCoverRoot, filename))) return trendCoverUrl(filename);
   }
   const remote = await fetch(sourceUrl, {
     redirect: "follow",
@@ -167,8 +190,17 @@ async function cacheTrendCover(feedId, sourceUrl) {
   if (!extension) throw Object.assign(new Error("小红书返回的头图格式不支持"), { status: 502 });
   const buffer = Buffer.from(await remote.arrayBuffer());
   if (!buffer.length || buffer.length > 12 * 1024 * 1024) throw Object.assign(new Error("头图为空或超过12MB"), { status: 502 });
-  writeFileSync(join(trendCoverRoot, `${feedId}.${extension}`), buffer, { mode: 0o600 });
-  return `/trend-covers/${feedId}.${extension}`;
+  const filename = `${feedId}.${extension}`;
+  writeFileSync(join(trendCoverRoot, filename), buffer, { mode: 0o600 });
+  return trendCoverUrl(filename);
+}
+
+function trendCoverKey(filename) {
+  return createHmac("sha256", managerToken).update(`trend-cover:${filename}`).digest("hex");
+}
+
+function trendCoverUrl(filename) {
+  return `http://${HOST}:${MANAGER_PORT}/trend-covers/${filename}?key=${trendCoverKey(filename)}`;
 }
 
 function leaseResult(slot) {
@@ -329,10 +361,13 @@ async function startProcess(accountId, slot) {
   const config = join(accountRoot, "config");
   const logs = join(accountRoot, "logs");
   for (const directory of [accountRoot, config, logs]) mkdirSync(directory, { recursive: true });
+  for (const directory of [accountRoot, config, logs]) chmodSync(directory, 0o700);
+  const cookiePath = join(accountRoot, "cookies.json");
+  if (existsSync(cookiePath)) chmodSync(cookiePath, 0o600);
   const logFd = openSync(join(logs, "mcp.log"), "a");
   const child = spawn(binary, ["-port", `${HOST}:${slot.port}`, `-headless=${!HEADED_BROWSER}`], {
     cwd: accountRoot,
-    env: { ...process.env, COOKIES_PATH: join(accountRoot, "cookies.json"), XDG_CONFIG_HOME: config },
+    env: { ...process.env, AUTH_TOKEN: managerToken, COOKIES_PATH: cookiePath, XDG_CONFIG_HOME: config },
     stdio: ["ignore", logFd, logFd],
   });
   closeSync(logFd);
@@ -418,6 +453,31 @@ async function drainQueue() {
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || "/", `http://${HOST}:${MANAGER_PORT}`);
+    const coverMatch = request.method === "GET" ? url.pathname.match(/^\/trend-covers\/([a-zA-Z0-9_-]{8,100}\.(?:jpg|png|webp|avif))$/) : null;
+    if (coverMatch) {
+      const filename = coverMatch[1];
+      const expected = Buffer.from(trendCoverKey(filename));
+      const supplied = Buffer.from(url.searchParams.get("key") || "");
+      const coverPath = join(trendCoverRoot, filename);
+      if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected) || !existsSync(coverPath)) {
+        return json(response, 404, { error: "Not found" });
+      }
+      const extension = filename.split(".").pop();
+      const contentType = { jpg: "image/jpeg", png: "image/png", webp: "image/webp", avif: "image/avif" }[extension] || "application/octet-stream";
+      response.writeHead(200, {
+        "content-type": contentType,
+        "cache-control": "private, max-age=86400",
+        "cross-origin-resource-policy": "same-site",
+        "x-content-type-options": "nosniff",
+      });
+      return response.end(readFileSync(coverPath));
+    }
+    const supplied = request.headers.authorization?.replace(/^Bearer\s+/i, "") || "";
+    const suppliedBytes = Buffer.from(supplied);
+    const expectedBytes = Buffer.from(managerToken);
+    if (suppliedBytes.length !== expectedBytes.length || !timingSafeEqual(suppliedBytes, expectedBytes)) {
+      return json(response, 401, { error: "本机运行服务拒绝了未授权请求" });
+    }
     if (request.method === "GET" && url.pathname === "/health") {
       return json(response, 200, { ok: true, capacity: SLOT_PORTS.length, active: slots.filter((slot) => slot.purpose === "worker" && slot.child).length, verificationActive: Boolean(slots.find((slot) => slot.purpose === "verification")?.child) });
     }

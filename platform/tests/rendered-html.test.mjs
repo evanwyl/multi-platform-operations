@@ -11,9 +11,15 @@ test("renders the local operations platform shell", async () => {
   }, { waitUntil() {}, passThroughOnException() {} });
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /<title>红薯台｜小红书内容运营中台<\/title>/);
+  assert.match(html, /<title>红薯台｜多平台内容运营中台<\/title>/);
   assert.match(html, /正在启动红薯台/);
   assert.doesNotMatch(html, /codex-preview/);
+});
+
+test("does not expose a personal name in the administrator setup example", async () => {
+  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /万勇龙/);
+  assert.match(source, /placeholder="请输入管理员显示名称"/);
 });
 
 test("keeps trend work mounted and starts only from the button", async () => {
@@ -21,6 +27,22 @@ test("keeps trend work mounted and starts only from the button", async () => {
   assert.match(source, /hidden=\{view !== "trends"\}/);
   assert.match(source, /onClick=\{startScan\}/);
   assert.doesNotMatch(source, /onKeyDown=\{[^\n]*startScan/);
+});
+
+test("makes dashboard summaries and recent tasks real navigation controls", async () => {
+  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/brand-system.css", import.meta.url), "utf8");
+  assert.match(source, /aria-label="工作台快捷入口"/);
+  assert.match(source, /label="待认领选题"[\s\S]*setView\("topics"\)/);
+  assert.match(source, /label="我的创作"[\s\S]*setView\("content"\)/);
+  assert.match(source, /label="等待审核"[\s\S]*setView\("review"\)/);
+  assert.match(source, /label="累计已发布"[\s\S]*setView\("publish"\)/);
+  assert.match(source, /className="task-row"[\s\S]*onClick=\{\(\) => openClaim\(claim\)\}/);
+  assert.match(source, /useState\(initialTarget\?\.account_id \?\? ""\)/);
+  assert.match(source, /useState\(initialTarget\?\.id \?\? ""\)/);
+  assert.match(source, /function Metric[\s\S]*<button type="button"/);
+  assert.match(styles, /\.metrics \.metric-card:hover/);
+  assert.match(styles, /\.task-row:focus-visible/);
 });
 
 test("keeps AI creation mounted and recommends whole-post image prompts without page cards or image generation", async () => {
@@ -297,7 +319,7 @@ test("lets admins remove other members while preserving attributed history", asy
   assert.doesNotMatch(route, /DELETE FROM users/);
 });
 
-test("shares the content workspace with every signed-in team member", async () => {
+test("shares content visibility while limiting edits to content operators", async () => {
   const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
   const creationRoute = await readFile(new URL("../app/api/creation/route.ts", import.meta.url), "utf8");
   const appRoute = await readFile(new URL("../app/api/app/route.ts", import.meta.url), "utf8");
@@ -306,6 +328,7 @@ test("shares the content workspace with every signed-in team member", async () =
   assert.match(source, /所有成员看到同一批已认领内容/);
   assert.doesNotMatch(source, /const ownedClaims = data\.claims/);
   assert.match(creationRoute, /return Boolean\(user\.id && claim\.id\)/);
+  assert.match(creationRoute, /return canView\(user, claim\) && can\(user, roleGroups\.operate\)/);
   assert.doesNotMatch(appRoute, /claim\.owner_id !== user\.id/);
   assert.doesNotMatch(creationRoute, /claim\.owner_id === user\.id/);
 });
@@ -333,8 +356,8 @@ test("shows complete content task labels and separates review from real publishi
   const publishRoute = await readFile(new URL("../app/api/publish/route.ts", import.meta.url), "utf8");
   const manager = await readFile(new URL("../runtime/manager.mjs", import.meta.url), "utf8");
   assert.match(source, /claim\.title \|\| claim\.topic_title/);
-  assert.match(source, /\["review", "✓", "审核中心"\]/);
-  assert.match(source, /\["publish", "↗", "发布列表"\]/);
+  assert.match(source, /\["review", CheckCircle, "审核中心"\]/);
+  assert.match(source, /\["publish", PaperPlaneTilt, "发布列表"\]/);
   assert.match(source, /通过并转入发布/);
   assert.match(source, /确认并发布到小红书/);
   assert.match(source, /查看内容/);
@@ -349,6 +372,29 @@ test("shows complete content task labels and separates review from real publishi
   assert.match(publishRoute, /UPDATE claims SET status='published'/);
   assert.match(manager, /url\.pathname === "\/publish-assets"/);
   assert.doesNotMatch(source, /<h2>审核与发布<\/h2>/);
+});
+
+test("uses one restrained product theme and one consistent icon family", async () => {
+  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
+  const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
+  const theme = await readFile(new URL("../app/product-theme.css", import.meta.url), "utf8");
+  assert.match(source, /from "@phosphor-icons\/react"/);
+  assert.match(source, /<NavIcon aria-hidden="true" size=\{18\}/);
+  assert.match(source, /<MetricIcon aria-hidden="true" size=\{19\}/);
+  assert.match(source, /className="skip-link" href="#main-content"/);
+  assert.match(source, /aria-current=\{view === id \? "page" : undefined\}/);
+  assert.match(source, /dashboard-topbar/);
+  assert.match(source, /topbar-visual/);
+  assert.match(source, /task-table-head/);
+  assert.match(source, /平台运行状态/);
+  assert.match(layout, /import "\.\/product-theme\.css"/);
+  assert.match(theme, /--brand-primary: #4f63d8/);
+  assert.match(theme, /--channel-xhs: #d85a62/);
+  assert.match(theme, /--channel-zhihu: #1677ff/);
+  assert.match(theme, /--radius-card: 14px/);
+  assert.match(theme, /--radius-control: 9px/);
+  assert.match(theme, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.doesNotMatch(theme, /#006eff|#1b9af2|#6547d6/);
 });
 
 test("allows unpublished content to return to revision before publishing", async () => {

@@ -1,8 +1,14 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+
+const localEnv = {
+  ...process.env,
+  RUNTIME_MANAGER_TOKEN: process.env.RUNTIME_MANAGER_TOKEN || randomBytes(32).toString("hex"),
+};
 
 const children = [
-  spawn("npm", ["run", "runtime"], { stdio: "inherit", env: process.env }),
-  spawn("npm", ["run", "dev:web"], { stdio: "inherit", env: process.env }),
+  spawn("npm", ["run", "runtime"], { stdio: "inherit", env: localEnv }),
+  spawn("npm", ["run", "dev:web"], { stdio: "inherit", env: localEnv }),
 ];
 
 let closing = false;

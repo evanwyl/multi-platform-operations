@@ -1,6 +1,7 @@
-import { currentUser } from "../../../lib/auth";
+import { currentUser, rejectCrossSiteMutation } from "../../../lib/auth";
 import { audit, database, ensureDatabase } from "../../../lib/database";
 import { callMcpTool, checkMcpLogin } from "../../../lib/xhs-mcp";
+import { managerFetch, protectedHeaders } from "../../../lib/runtime-client";
 
 type AccountRow = { id: string; name: string; xhs_user_id: string | null; xhs_nickname: string | null; xhs_red_id: string | null };
 
@@ -9,7 +10,7 @@ type RuntimePurpose = "worker" | "verification";
 async function runtime(path: "acquire" | "release" | "discard" | "touch", accountId: string, purpose: RuntimePurpose = "worker", options: { holdMs?: number; close?: boolean } = {}) {
   let response: Response;
   try {
-    response = await fetch(`http://127.0.0.1:18100/${path}`, {
+    response = await managerFetch(`/${path}`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ accountId, purpose, ...options }),
     });
   } catch { throw new Error("小红书运行管理器未启动"); }
@@ -19,7 +20,7 @@ async function runtime(path: "acquire" | "release" | "discard" | "touch", accoun
 }
 
 async function readUniqueIdentity(port: number) {
-  const response = await fetch(`http://127.0.0.1:${port}/api/v1/login/status`, { headers: { accept: "application/json" } });
+  const response = await fetch(`http://127.0.0.1:${port}/api/v1/login/status`, { headers: protectedHeaders({ accept: "application/json" }) });
   if (!response.ok) throw new Error("账号已登录，但唯一身份ID读取超时，请稍后再次核验");
   const payload = await response.json() as { success?: boolean; data?: { is_logged_in?: boolean; username?: string; user_id?: string }; message?: string };
   if (!payload.success || !payload.data?.is_logged_in || !payload.data.user_id?.trim()) throw new Error("账号已登录，但没有取得唯一身份ID，已阻止绑定");
@@ -28,6 +29,8 @@ async function readUniqueIdentity(port: number) {
 
 export async function POST(request: Request) {
   await ensureDatabase();
+  const crossSite = rejectCrossSiteMutation(request);
+  if (crossSite) return crossSite;
   const user = await currentUser(request);
   if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
   if (!(JSON.parse(user.roles) as string[]).includes("admin")) return Response.json({ error: "只有管理员可以登录小红书账号" }, { status: 403 });
