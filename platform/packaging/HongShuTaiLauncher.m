@@ -586,6 +586,68 @@
   return nil;
 }
 
+- (void)webView:(WKWebView *)webView
+    runOpenPanelWithParameters:(WKOpenPanelParameters *)parameters
+    initiatedByFrame:(WKFrameInfo *)frame
+    completionHandler:(void (^)(NSArray<NSURL *> * _Nullable URLs))completionHandler {
+  NSOpenPanel *panel = [NSOpenPanel openPanel];
+  panel.canChooseFiles = YES;
+  panel.canChooseDirectories = parameters.allowsDirectories;
+  panel.allowsMultipleSelection = parameters.allowsMultipleSelection;
+  panel.resolvesAliases = YES;
+  panel.allowedFileTypes = @[ @"jpg", @"jpeg", @"png", @"webp" ];
+  [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+    completionHandler(result == NSModalResponseOK ? panel.URLs : nil);
+  }];
+}
+
+- (void)webView:(WKWebView *)webView
+    runJavaScriptAlertPanelWithMessage:(NSString *)message
+    initiatedByFrame:(WKFrameInfo *)frame
+    completionHandler:(void (^)(void))completionHandler {
+  NSAlert *alert = [[NSAlert alloc] init];
+  alert.messageText = @"红薯台";
+  alert.informativeText = message ?: @"";
+  [alert addButtonWithTitle:@"知道了"];
+  [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+    completionHandler();
+  }];
+}
+
+- (void)webView:(WKWebView *)webView
+    runJavaScriptConfirmPanelWithMessage:(NSString *)message
+    initiatedByFrame:(WKFrameInfo *)frame
+    completionHandler:(void (^)(BOOL result))completionHandler {
+  NSAlert *alert = [[NSAlert alloc] init];
+  alert.alertStyle = NSAlertStyleWarning;
+  alert.messageText = @"请确认操作";
+  alert.informativeText = message ?: @"";
+  [alert addButtonWithTitle:@"确认"];
+  [alert addButtonWithTitle:@"取消"];
+  [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+    completionHandler(result == NSAlertFirstButtonReturn);
+  }];
+}
+
+- (void)webView:(WKWebView *)webView
+    runJavaScriptTextInputPanelWithPrompt:(NSString *)prompt
+    defaultText:(NSString *)defaultText
+    initiatedByFrame:(WKFrameInfo *)frame
+    completionHandler:(void (^)(NSString * _Nullable result))completionHandler {
+  NSAlert *alert = [[NSAlert alloc] init];
+  alert.messageText = @"请输入信息";
+  alert.informativeText = prompt ?: @"";
+  NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 420, 28)];
+  field.stringValue = defaultText ?: @"";
+  field.selectable = YES;
+  alert.accessoryView = field;
+  [alert addButtonWithTitle:@"确认"];
+  [alert addButtonWithTitle:@"取消"];
+  [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+    completionHandler(result == NSAlertFirstButtonReturn ? field.stringValue : nil);
+  }];
+}
+
 - (void)openDataFolder:(id)sender {
   if (self.dataRoot) [[NSWorkspace sharedWorkspace] openURL:self.dataRoot];
 }
