@@ -500,10 +500,12 @@ select:focus,
 }
 
 .focus-card h2 {
-  max-width: 19ch;
+  max-width: none;
   margin: 13px 0 8px;
-  font-size: 27px;
+  font-size: clamp(22px, 1.8vw, 26px);
   line-height: 1.18;
+  letter-spacing: -.055em;
+  white-space: nowrap;
 }
 
 .focus-card p,
@@ -541,9 +543,9 @@ select:focus,
 }
 
 .progress-ring {
-  width: 132px;
-  height: 132px;
-  margin-right: 18px;
+  width: 118px;
+  height: 118px;
+  margin-right: 0;
   background: conic-gradient(var(--brand-primary) 0 var(--progress), #dfe3ec var(--progress) 100%);
   box-shadow: 0 12px 25px rgb(62 74 118 / 10%);
 }
@@ -1363,6 +1365,27 @@ button:disabled {
   color: var(--brand-action);
 }
 
+.view-topics .creation-strip {
+  background: #f1f3fa;
+}
+
+.view-topics .creation-strip h2 {
+  color: var(--ink);
+}
+
+.view-topics .topic-status-tabs {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  overflow: visible;
+  scrollbar-width: none;
+}
+
+.view-topics .topic-status-tabs button {
+  width: auto;
+  min-width: 0;
+  justify-content: center;
+}
+
 .creative-command-row input,
 .trend-command input,
 .search-plan-card input,
@@ -1462,6 +1485,10 @@ button:disabled {
   .account-panel {
     display: block;
   }
+
+  .focus-card h2 {
+    white-space: normal;
+  }
 }
 
 @media (max-width: 760px) {
@@ -1499,6 +1526,10 @@ button:disabled {
 
   .metrics {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .view-topics .topic-status-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .metrics .metric-card {

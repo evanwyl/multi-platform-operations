@@ -387,6 +387,9 @@ test("uses one restrained product theme and one consistent icon family", async (
   assert.match(source, /topbar-visual/);
   assert.match(source, /task-table-head/);
   assert.match(source, /平台运行状态/);
+  assert.match(theme, /\.view-topics \.creation-strip h2\s*\{[^}]*color: var\(--ink\)/s);
+  assert.match(theme, /\.view-topics \.topic-status-tabs\s*\{[^}]*grid-template-columns: repeat\(6, minmax\(0, 1fr\)\)[^}]*overflow: visible/s);
+  assert.match(theme, /\.focus-card h2\s*\{[^}]*white-space: nowrap/s);
   assert.match(layout, /import "\.\/product-theme\.css"/);
   assert.match(theme, /--brand-primary: #4f63d8/);
   assert.match(theme, /--channel-xhs: #d85a62/);
