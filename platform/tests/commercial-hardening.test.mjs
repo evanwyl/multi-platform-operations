@@ -24,10 +24,25 @@ test("enforces server-side role boundaries for mutations", async () => {
   assert.match(permissions, /publish: \["admin", "publisher"\]/);
   assert.match(creation, /can\(user, roleGroups\.operate\)/);
   assert.match(trends, /action !== "save_settings" && !can\(user, roleGroups\.operate\)/);
-  for (const action of ["create_topic", "archive_topics_bulk", "claim_topic", "save_draft", "submit_review"]) {
+  for (const action of ["create_topic", "archive_topics_bulk", "claim_topic", "save_draft", "upload_review_images", "submit_review"]) {
     const block = app.slice(app.indexOf(`action === "${action}"`));
     assert.match(block.slice(0, 300), /can\(user, roleGroups\.operate\)/, `${action} must require operator permissions`);
   }
+});
+
+test("freezes final images with copy before review and prevents publish-time replacement", async () => {
+  const app = await source("app/api/app/route.ts");
+  const publish = await source("app/api/publish/route.ts");
+  const manager = await source("runtime/manager.mjs");
+  assert.match(app, /action === "upload_review_images"/);
+  assert.match(app, /status IN \('writing','revision'\)/);
+  assert.match(app, /请先上传至少一张最终图片，再提交图文审核/);
+  assert.match(app, /images: reviewImages/);
+  assert.match(app, /缺少最终图片，不能通过图文审核/);
+  assert.doesNotMatch(publish, /action === "upload_images"/);
+  assert.match(publish, /Array\.isArray\(frozen\?\.images\)/);
+  assert.match(publish, /审核快照中没有图片/);
+  assert.match(manager, /url\.pathname === "\/publish-asset"/);
 });
 
 test("claims a publish job atomically before calling the browser", async () => {
@@ -40,6 +55,35 @@ test("claims a publish job atomically before calling the browser", async () => {
   assert.match(publish, /resolve_interrupted/);
   assert.match(publish, /超过8分钟仍处于发布中/);
   assert.match(publish, /status='publishing' AND updated_at=\?/);
+});
+
+test("records publish jobs, attempts, and uncertain delivery outcomes", async () => {
+  const database = await source("lib/database.ts");
+  const publish = await source("app/api/publish/route.ts");
+  assert.match(database, /CREATE TABLE IF NOT EXISTS publish_jobs/);
+  assert.match(database, /idempotency_key TEXT NOT NULL UNIQUE/);
+  assert.match(database, /CREATE TABLE IF NOT EXISTS publish_attempts/);
+  assert.match(database, /idx_publish_attempts_job_number/);
+  assert.match(publish, /INSERT INTO publish_jobs/);
+  assert.match(publish, /INSERT INTO publish_attempts/);
+  assert.match(publish, /publishDispatched && isUncertainPublishError\(message\)/);
+  assert.match(publish, /uncertain \? "publishing" : "failed"/);
+  assert.match(publish, /发布结果待核验/);
+  assert.match(publish, /UPDATE publish_jobs SET status=\?,last_error=\?,updated_at=\?,completed_at=\?/);
+  assert.match(publish, /UPDATE publish_attempts SET status=\?,error=\?,completed_at=\?/);
+});
+
+test("enforces one active claim per topic and account at the database boundary", async () => {
+  const database = await source("lib/database.ts");
+  const app = await source("app/api/app/route.ts");
+  assert.match(database, /ROW_NUMBER\(\) OVER \(\s*PARTITION BY topic_id,account_id/s);
+  assert.match(database, /WHERE duplicate_rank>1/);
+  assert.match(database, /CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_active_topic_account\s+ON claims\(topic_id,account_id\) WHERE status NOT IN \('published','archived'\)/s);
+  const claimBlock = app.slice(app.indexOf('action === "claim_topic"'), app.indexOf('action === "save_draft"'));
+  assert.match(claimBlock, /try \{\s*await db\.batch/s);
+  assert.match(claimBlock, /const competingClaim = await db\.prepare/);
+  assert.match(claimBlock, /刚刚已被这个账号认领，请刷新列表/);
+  assert.match(claimBlock, /status: 409/);
 });
 
 test("protects the local manager and repairs cookie permissions", async (context) => {
@@ -93,6 +137,24 @@ test("protects the local manager and repairs cookie permissions", async (context
   assert.equal(await cover.text(), "image-bytes");
   const rejectedCover = await fetch(`http://127.0.0.1:${port}/trend-covers/${coverName}?key=wrong`);
   assert.equal(rejectedCover.status, 404);
+});
+
+test("implements the native macOS file chooser for review image uploads", async () => {
+  const launcher = await source("packaging/HongShuTaiLauncher.m");
+  assert.match(launcher, /runOpenPanelWithParameters/);
+  assert.match(launcher, /NSOpenPanel \*panel/);
+  assert.match(launcher, /parameters\.allowsMultipleSelection/);
+  assert.match(launcher, /@"jpg", @"jpeg", @"png", @"webp"/);
+  assert.match(launcher, /completionHandler\(result == NSModalResponseOK \? panel\.URLs : nil\)/);
+});
+
+test("implements native JavaScript dialogs required by publish and recovery actions", async () => {
+  const launcher = await source("packaging/HongShuTaiLauncher.m");
+  assert.match(launcher, /runJavaScriptAlertPanelWithMessage/);
+  assert.match(launcher, /runJavaScriptConfirmPanelWithMessage/);
+  assert.match(launcher, /completionHandler\(result == NSAlertFirstButtonReturn\)/);
+  assert.match(launcher, /runJavaScriptTextInputPanelWithPrompt/);
+  assert.match(launcher, /field\.stringValue = defaultText/);
 });
 
 test("backs up and restores local customer data without unsafe archive paths", async (context) => {

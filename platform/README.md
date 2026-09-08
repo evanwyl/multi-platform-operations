@@ -1,4 +1,4 @@
-# 红薯台 Local 0.13.3
+# 红薯台 Local 0.14.9
 
 红薯台是运行在买家自己 Mac 上的小红书多账号内容运营工具。当前版本定位为 **macOS Apple Silicon 付费测试版**，不是 SaaS：业务数据库、账号 Cookie、AI Key 和发布素材都保存在本机。
 

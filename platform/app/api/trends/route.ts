@@ -317,7 +317,7 @@ export async function POST(request: Request) {
       }
     }
     if (settings.next_allowed_at && new Date(settings.next_allowed_at) > now) {
-      const latest = await db.prepare("SELECT id,status,started_at FROM trend_scans WHERE target_account_id=? AND keywords=? AND status IN ('completed','analyzed') ORDER BY started_at DESC LIMIT 1")
+      const latest = await db.prepare("SELECT id,status,started_at FROM trend_scans WHERE target_account_id=? AND keywords=? AND result_count>=3 AND status IN ('completed','analyzed') ORDER BY started_at DESC LIMIT 1")
         .bind(targetAccount.id, JSON.stringify(keywords)).first<{ id: string; status: string; started_at: string }>();
       let detailSampleIds: string[] = [];
       if (latest) {
@@ -467,6 +467,15 @@ export async function POST(request: Request) {
     const nextAllowed = new Date(finishedAt.getTime() + 24 * 60 * 60 * 1000).toISOString();
     const scanSamples = await db.prepare(`SELECT id,feed_id,title,keyword,matched_keywords,liked_count,collected_count,comment_count,detail_text,processing_status,status
       FROM trend_samples WHERE last_seen_at>=? AND status!='archived'`).bind((scan as Scan & { started_at: string }).started_at).all<DbRow>();
+    if (!scanSamples.results.length) {
+      const recordedError = String((scan as Scan & { error?: string }).error || "").trim();
+      const message = recordedError
+        ? `本次搜索没有获得任何样本：${recordedError}`
+        : "本次搜索没有获得任何样本，请先检查采集账号登录状态后重试";
+      await db.prepare("UPDATE trend_scans SET status='failed',error=?,completed_at=? WHERE id=?").bind(message.slice(0, 1000), finishedAt.toISOString(), scan.id).run();
+      await runtime("release", scan.account_id).catch(() => undefined);
+      return Response.json({ error: message }, { status: 502 });
+    }
     const engagements = scanSamples.results.map((sample) => metricValue(sample.liked_count) + metricValue(sample.collected_count) * 1.5 + metricValue(sample.comment_count) * 2);
     const maxEngagement = Math.max(1, ...engagements);
     const heatScores = engagements.map((engagement) => Math.round(100 * Math.log1p(engagement) / Math.log1p(maxEngagement)));

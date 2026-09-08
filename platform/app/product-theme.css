@@ -1545,6 +1545,31 @@ button:disabled {
   }
 }
 
+.view-content .creative-shell.content-editor-shell {
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, .85fr);
+  align-items: stretch;
+}
+
+.view-content .content-editor-shell .creative-main,
+.view-content .content-editor-shell .visual-builder {
+  min-width: 0;
+  height: 100%;
+}
+
+.view-content .content-editor-shell .visual-builder {
+  grid-column: auto;
+}
+
+@media (max-width: 900px) {
+  .view-content .creative-shell.content-editor-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .view-content .content-editor-shell .visual-builder {
+    grid-column: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

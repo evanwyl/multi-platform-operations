@@ -16,6 +16,20 @@ test("renders the local operations platform shell", async () => {
   assert.doesNotMatch(html, /codex-preview/);
 });
 
+test("opens an explicit account menu before signing out and shows AI wait progress", async () => {
+  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/brand-system.css", import.meta.url), "utf8");
+  assert.match(source, /profileMenuOpen/);
+  assert.match(source, /role="menu"/);
+  assert.match(source, /role="menuitem"/);
+  assert.doesNotMatch(source, /onClick=\{logout\} aria-label="退出登录"/);
+  assert.match(source, /creationSeconds/);
+  assert.match(source, /正在生成并润色完整图文稿/);
+  assert.match(source, /正在校验正文和整套配图提示词/);
+  assert.match(styles, /\.profile-menu/);
+  assert.match(styles, /\.creation-progress/);
+});
+
 test("does not expose a personal name in the administrator setup example", async () => {
   const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /万勇龙/);
@@ -71,8 +85,8 @@ test("keeps AI creation mounted and recommends whole-post image prompts without 
   assert.match(runtime, /response_format/);
   assert.match(runtime, /json_schema/);
   assert.match(source, /保存并提交审核/);
-  assert.match(source, /团队共享内容 · 选择账号/);
-  assert.match(source, /请选择一个账号/);
+  assert.match(source, /先选择要管理的内容账号/);
+  assert.match(source, /进入账号 →/);
   assert.match(source, /accountClaims/);
   assert.match(source, /contentStageLabel/);
 });
@@ -244,7 +258,8 @@ test("supports confirmed bulk deletion without hard-deleting sample or topic rec
   const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
   const route = await readFile(new URL("../app/api/trends/route.ts", import.meta.url), "utf8");
   assert.match(source, /archive_samples_bulk/);
-  assert.match(source, /window\.confirm/);
+  assert.match(source, /confirmingSampleDelete/);
+  assert.match(source, /role="alertdialog"/);
   assert.match(source, /批量删除/);
   assert.match(source, /正式选题不受影响/);
   assert.match(route, /action === "archive_samples_bulk"/);
@@ -274,6 +289,7 @@ test("supports selecting and safely bulk deleting topics", async () => {
   assert.match(source, /selectedTopics/);
   assert.match(source, /全选当前分类/);
   assert.match(source, /archive_topics_bulk/);
+  assert.match(source, /confirmingTopicDelete/);
   assert.match(source, /已有的认领、创作、审核和发布记录会继续保留/);
   assert.match(route, /action === "archive_topics_bulk"/);
   assert.match(route, /UPDATE topics SET archived_at=\?/);
@@ -282,6 +298,15 @@ test("supports selecting and safely bulk deleting topics", async () => {
   assert.match(brand, /\.topic-claim-button \{[\s\S]*?grid-column: 4/);
   assert.match(brand, /\.view-topics \.topic-status-tabs button \{[\s\S]*?width: 84px/);
   assert.match(brand, /\.view-topics \.topic-batch-bar \{[\s\S]*?margin-inline: 0/);
+});
+
+test("authenticates the runtime manager MCP readiness probe", async () => {
+  const runtime = await readFile(new URL("../runtime/manager.mjs", import.meta.url), "utf8");
+  const route = await readFile(new URL("../app/api/trends/route.ts", import.meta.url), "utf8");
+  assert.match(runtime, /authorization: `Bearer \$\{managerToken\}`/);
+  assert.match(runtime, /小红书 MCP 就绪检查超时/);
+  assert.match(route, /本次搜索没有获得任何样本/);
+  assert.match(route, /result_count>=3/);
 });
 
 test("blocks legacy AI topics whose source body was never verified", async () => {
@@ -324,8 +349,8 @@ test("shares content visibility while limiting edits to content operators", asyn
   const creationRoute = await readFile(new URL("../app/api/creation/route.ts", import.meta.url), "utf8");
   const appRoute = await readFile(new URL("../app/api/app/route.ts", import.meta.url), "utf8");
   assert.match(source, /const teamClaims = data\.claims/);
-  assert.match(source, /团队共享内容/);
-  assert.match(source, /所有成员看到同一批已认领内容/);
+  assert.match(source, /共 \{claims\.length\} 条团队内容/);
+  assert.match(source, /查看账号资料与内容进度/);
   assert.doesNotMatch(source, /const ownedClaims = data\.claims/);
   assert.match(creationRoute, /return Boolean\(user\.id && claim\.id\)/);
   assert.match(creationRoute, /return canView\(user, claim\) && can\(user, roleGroups\.operate\)/);
@@ -358,10 +383,10 @@ test("shows complete content task labels and separates review from real publishi
   assert.match(source, /claim\.title \|\| claim\.topic_title/);
   assert.match(source, /\["review", CheckCircle, "审核中心"\]/);
   assert.match(source, /\["publish", PaperPlaneTilt, "发布列表"\]/);
-  assert.match(source, /通过并转入发布/);
-  assert.match(source, /确认并发布到小红书/);
+  assert.match(source, /通过图文并转入发布/);
+  assert.match(source, /确认并发布审核图文/);
   assert.match(source, /查看内容/);
-  assert.match(source, /审核冻结内容/);
+  assert.match(source, /审核冻结图文/);
   assert.match(source, /publish_snapshot/);
   assert.match(source, /window\.confirm/);
   assert.match(publishRoute, /callMcpTool\(port, "publish_content"/);
@@ -383,8 +408,8 @@ test("uses one restrained product theme and one consistent icon family", async (
   assert.match(source, /<MetricIcon aria-hidden="true" size=\{19\}/);
   assert.match(source, /className="skip-link" href="#main-content"/);
   assert.match(source, /aria-current=\{view === id \? "page" : undefined\}/);
-  assert.match(source, /dashboard-topbar/);
-  assert.match(source, /topbar-visual/);
+  assert.doesNotMatch(source, /<header className=\{`topbar/);
+  assert.doesNotMatch(source, />新建内容<\/button>/);
   assert.match(source, /task-table-head/);
   assert.match(source, /平台运行状态/);
   assert.match(theme, /\.view-topics \.creation-strip h2\s*\{[^}]*color: var\(--ink\)/s);
@@ -398,6 +423,44 @@ test("uses one restrained product theme and one consistent icon family", async (
   assert.match(theme, /--radius-control: 9px/);
   assert.match(theme, /@media \(prefers-reduced-motion: reduce\)/);
   assert.doesNotMatch(theme, /#006eff|#1b9af2|#6547d6/);
+});
+
+test("uses one page scrollbar for content creation", async () => {
+  const styles = await readFile(new URL("../app/brand-system.css", import.meta.url), "utf8");
+  assert.match(styles, /\.view-content \.creative-task-list,[\s\S]*?\.view-content \.visual-builder\s*\{[\s\S]*?position: static;[\s\S]*?max-height: none;[\s\S]*?overflow: visible;/);
+});
+
+test("organizes my content by account, content list, and AI editor", async () => {
+  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
+  const brand = await readFile(new URL("../app/brand-system.css", import.meta.url), "utf8");
+  const theme = await readFile(new URL("../app/product-theme.css", import.meta.url), "utf8");
+  assert.match(source, /useState<"accounts" \| "list" \| "editor">/);
+  assert.match(source, /先选择要管理的内容账号/);
+  assert.match(source, /进入账号 →/);
+  assert.match(source, /← 返回账号/);
+  assert.match(source, /← 返回内容列表/);
+  assert.match(source, /一句话生成可编辑的小红书图文稿/);
+  assert.match(source, /整个帖子的图片提示词/);
+  assert.doesNotMatch(source, /setSelectedAccountId\(accountClaims\[0\]/);
+  assert.match(brand, /\.content-account-overview-grid/);
+  assert.match(brand, /\.content-task-grid/);
+  assert.match(theme, /\.view-content \.creative-shell\.content-editor-shell/);
+  assert.match(theme, /grid-template-columns: minmax\(0, 1\.35fr\) minmax\(260px, \.85fr\)/);
+  assert.match(theme, /\.view-content \.content-editor-shell \.visual-builder\s*\{[\s\S]*?grid-column: auto;/);
+  assert.match(theme, /@media \(max-width: 900px\)/);
+});
+
+test("uploads and reviews final images before publishing", async () => {
+  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/brand-system.css", import.meta.url), "utf8");
+  assert.match(source, /最终审核图片/);
+  assert.match(source, /upload_review_images/);
+  assert.match(source, /保存图文并提交审核/);
+  assert.match(source, /通过图文并转入发布/);
+  assert.match(source, /确认并发布审核图文/);
+  assert.doesNotMatch(source, /重新选择图片/);
+  assert.match(styles, /\.review-image-grid/);
+  assert.match(styles, /\.review-missing-images/);
 });
 
 test("allows unpublished content to return to revision before publishing", async () => {

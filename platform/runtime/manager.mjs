@@ -335,14 +335,14 @@ async function ready(port, child) {
     try {
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+        headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json", accept: "application/json, text/event-stream" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "hongshutai-runtime", version: "0.1.0" } } }),
       });
       if (response.ok) return;
     } catch { void 0; }
     await new Promise((done) => setTimeout(done, 250));
   }
-  throw new Error("小红书 MCP 启动超时");
+  throw new Error("小红书 MCP 就绪检查超时，请查看账号运行日志");
 }
 
 function stop(slot, reason = "release") {
@@ -483,6 +483,17 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "GET" && url.pathname === "/slots") {
       return json(response, 200, { pending: acquireQueue.length, slots: slots.map((slot) => ({ port: slot.port, purpose: slot.purpose, accountId: slot.accountId, active: Boolean(slot.child), busy: slot.leased, stopping: slot.stopping, protectedUntil: slot.protectedUntil, lastUsed: slot.lastUsed })) });
+    }
+    if (request.method === "GET" && url.pathname === "/publish-asset") {
+      const assetPath = resolve(url.searchParams.get("path") || "");
+      const relative = assetPath.slice(publishAssetRoot.length + 1);
+      if (!relative || assetPath === publishAssetRoot || !assetPath.startsWith(`${publishAssetRoot}/`) || relative.includes("..") || !existsSync(assetPath)) {
+        return json(response, 404, { error: "图片不存在" });
+      }
+      const extension = assetPath.split(".").pop()?.toLowerCase();
+      const contentType = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" }[extension] || "application/octet-stream";
+      response.writeHead(200, { "content-type": contentType, "cache-control": "private, max-age=300", "x-content-type-options": "nosniff" });
+      return response.end(readFileSync(assetPath));
     }
     if (request.method === "GET" && url.pathname === "/ai/settings") {
       return json(response, 200, publicAISettings());

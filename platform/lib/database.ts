@@ -60,6 +60,20 @@ const schemaStatements = [
     created_by TEXT NOT NULL, created_at TEXT NOT NULL,
     FOREIGN KEY(claim_id) REFERENCES claims(id), FOREIGN KEY(created_by) REFERENCES users(id)
   )`,
+  `CREATE TABLE IF NOT EXISTS publish_jobs (
+    id TEXT PRIMARY KEY, claim_id TEXT NOT NULL, idempotency_key TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'publishing', requested_by TEXT NOT NULL,
+    attempt_count INTEGER NOT NULL DEFAULT 1, last_error TEXT NOT NULL DEFAULT '',
+    result_detail TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    completed_at TEXT,
+    FOREIGN KEY(claim_id) REFERENCES claims(id), FOREIGN KEY(requested_by) REFERENCES users(id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS publish_attempts (
+    id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt_number INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'publishing', error TEXT NOT NULL DEFAULT '',
+    result_detail TEXT NOT NULL DEFAULT '', started_at TEXT NOT NULL, completed_at TEXT,
+    FOREIGN KEY(job_id) REFERENCES publish_jobs(id)
+  )`,
   `CREATE TABLE IF NOT EXISTS audit_logs (
     id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, action TEXT NOT NULL,
     object_type TEXT NOT NULL, object_id TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
@@ -110,6 +124,8 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_claims_owner_status ON claims(owner_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_claims_account_status ON claims(account_id, status)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_versions_claim_number ON claim_versions(claim_id, version_number)`,
+  `CREATE INDEX IF NOT EXISTS idx_publish_jobs_claim_status ON publish_jobs(claim_id, status, created_at)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_publish_attempts_job_number ON publish_attempts(job_id, attempt_number)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_trend_samples_status_seen ON trend_samples(status, last_seen_at)`,
   `CREATE INDEX IF NOT EXISTS idx_trend_scans_started ON trend_scans(started_at)`,
@@ -207,6 +223,16 @@ async function initializeDatabase() {
   await db.prepare("UPDATE accounts SET status='login_expired' WHERE is_demo=0 AND xhs_user_id IS NULL AND status='online'").run();
   await db.prepare("DROP INDEX IF EXISTS idx_accounts_mcp_port_real").run();
   await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_xhs_user_id ON accounts(xhs_user_id) WHERE xhs_user_id IS NOT NULL").run();
+  await db.prepare(`UPDATE claims SET status='archived',updated_at=? WHERE id IN (
+    SELECT id FROM (
+      SELECT id,ROW_NUMBER() OVER (
+        PARTITION BY topic_id,account_id ORDER BY updated_at DESC,created_at ASC,id ASC
+      ) AS duplicate_rank
+      FROM claims WHERE status NOT IN ('published','archived')
+    ) WHERE duplicate_rank>1
+  )`).bind(new Date().toISOString()).run();
+  await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_active_topic_account
+    ON claims(topic_id,account_id) WHERE status NOT IN ('published','archived')`).run();
   await db.prepare("INSERT OR IGNORE INTO trend_settings (id,keywords,exclude_keywords,publish_time,sort_by,updated_at) VALUES ('default','[]','[]','一周内','最多点赞',?)")
     .bind(new Date().toISOString()).run();
   await db.prepare(`UPDATE trend_settings SET account_id=(SELECT id FROM accounts WHERE is_demo=0 LIMIT 1)

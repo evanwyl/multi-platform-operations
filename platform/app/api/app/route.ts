@@ -26,6 +26,7 @@ function parseTextList(value: unknown) {
 
 type AISettings = { configured: boolean; baseUrl: string; model: string; keySource: string; busy?: boolean; unavailable?: boolean };
 type DbRow = Record<string, string | number | null>;
+type ReviewFile = { name?: string; type?: string; data?: string };
 
 async function runtimeAI(path: "settings" | "test", options?: RequestInit) {
   let response: Response;
@@ -229,11 +230,18 @@ export async function POST(request: Request) {
     const existing = await db.prepare("SELECT id FROM claims WHERE topic_id=? AND account_id=? AND status NOT IN ('published','archived')").bind(topicId, accountId).first();
     if (existing) return Response.json({ error: "该选题已被这个账号认领" }, { status: 409 });
     const id = crypto.randomUUID();
-    await db.batch([
-      db.prepare("INSERT INTO claims (id,topic_id,account_id,owner_id,angle,status,created_at,updated_at) VALUES (?,?,?,?,?,'writing',?,?)")
-        .bind(id, topicId, accountId, user.id, String(data.angle ?? ""), now, now),
-      db.prepare("UPDATE topics SET status='claimed' WHERE id=?").bind(topicId),
-    ]);
+    try {
+      await db.batch([
+        db.prepare("INSERT INTO claims (id,topic_id,account_id,owner_id,angle,status,created_at,updated_at) VALUES (?,?,?,?,?,'writing',?,?)")
+          .bind(id, topicId, accountId, user.id, String(data.angle ?? ""), now, now),
+        db.prepare("UPDATE topics SET status='claimed' WHERE id=?").bind(topicId),
+      ]);
+    } catch (error) {
+      const competingClaim = await db.prepare("SELECT id FROM claims WHERE topic_id=? AND account_id=? AND status NOT IN ('published','archived')")
+        .bind(topicId, accountId).first();
+      if (competingClaim) return Response.json({ error: "该选题刚刚已被这个账号认领，请刷新列表" }, { status: 409 });
+      throw error;
+    }
     await audit(user.id, "认领选题", "claim", id, String(data.angle ?? ""));
     return Response.json({ ok: true, id }, { status: 201 });
   }
@@ -250,13 +258,37 @@ export async function POST(request: Request) {
     return Response.json({ ok: true });
   }
 
+  if (action === "upload_review_images") {
+    if (!can(user, roleGroups.operate)) return forbidden("只有管理员或内容运营可以上传审核图片");
+    const id = String(data.id ?? "");
+    const claim = await db.prepare("SELECT id,status FROM claims WHERE id=?").bind(id).first<{ id: string; status: string }>();
+    if (!claim) return Response.json({ error: "内容任务不存在" }, { status: 404 });
+    if (!["writing", "revision"].includes(claim.status)) return Response.json({ error: "只有创作中或待修改的内容可以更换图片" }, { status: 409 });
+    const files = (Array.isArray(data.files) ? data.files : []).slice(0, 9) as ReviewFile[];
+    if (!files.length || files.some((file) => !file.data || !file.type)) return Response.json({ error: "请选择1-9张有效图片" }, { status: 400 });
+    const response = await managerFetch("/publish-assets", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ claimId: id, files }),
+    }).catch(() => null);
+    if (!response) return Response.json({ error: "本机图片保存服务未启动" }, { status: 503 });
+    const payload = await response.json() as { paths?: string[]; error?: string };
+    if (!response.ok || !payload.paths?.length) return Response.json({ error: payload.error || "图片保存失败" }, { status: 502 });
+    const result = await db.prepare("UPDATE claims SET publish_images=?,updated_at=? WHERE id=? AND status IN ('writing','revision')")
+      .bind(JSON.stringify(payload.paths), now, id).run();
+    if (!result.meta.changes) return Response.json({ error: "内容状态已变化，无法更换图片" }, { status: 409 });
+    await audit(user.id, "上传内容审核图片", "claim", id, `${payload.paths.length} 张图片`);
+    return Response.json({ ok: true, count: payload.paths.length });
+  }
+
   if (action === "submit_review") {
     if (!can(user, roleGroups.operate)) return forbidden("只有管理员或内容运营可以提交审核");
     const id = String(data.id ?? "");
-    const claim = await db.prepare("SELECT owner_id,title,body FROM claims WHERE id=?").bind(id).first<{ owner_id: string; title: string; body: string }>();
+    const claim = await db.prepare("SELECT owner_id,title,body,publish_images,status FROM claims WHERE id=?").bind(id).first<{ owner_id: string; title: string; body: string; publish_images: string; status: string }>();
     if (!claim) return Response.json({ error: "内容任务不存在" }, { status: 404 });
+    if (!["writing", "revision"].includes(claim.status)) return Response.json({ error: "只有创作中或待修改的内容可以提交审核" }, { status: 409 });
     if (!claim.title.trim() || !claim.body.trim()) return Response.json({ error: "标题和正文填写完整后才能提交" }, { status: 400 });
-    await db.prepare("UPDATE claims SET status='review',review_comment='',updated_at=? WHERE id=?").bind(now, id).run();
+    const images = JSON.parse(claim.publish_images || "[]") as string[];
+    if (!images.length) return Response.json({ error: "请先上传至少一张最终图片，再提交图文审核" }, { status: 400 });
+    await db.prepare("UPDATE claims SET status='review',review_comment='',updated_at=? WHERE id=? AND status IN ('writing','revision')").bind(now, id).run();
     await audit(user.id, "提交审核", "claim", id);
     return Response.json({ ok: true });
   }
@@ -267,13 +299,16 @@ export async function POST(request: Request) {
     const result = data.result === "approve" ? "approved" : "revision";
     const comment = String(data.comment ?? "").trim();
     if (result === "revision" && !comment) return Response.json({ error: "退回时必须填写原因" }, { status: 400 });
-    const claim = await db.prepare("SELECT title,body,tags,creative_json,version_number,status FROM claims WHERE id=?").bind(id).first<Record<string, unknown>>();
+    const claim = await db.prepare("SELECT title,body,tags,creative_json,version_number,publish_images,status FROM claims WHERE id=?").bind(id).first<Record<string, unknown>>();
     if (!claim || claim.status !== "review") return Response.json({ error: "内容当前不在待审核状态" }, { status: 409 });
+    const reviewImages = JSON.parse(String(claim.publish_images || "[]")) as string[];
+    if (result === "approved" && !reviewImages.length) return Response.json({ error: "缺少最终图片，不能通过图文审核" }, { status: 400 });
     const snapshot = result === "approved" ? JSON.stringify({
       title: claim.title,
       body: claim.body,
       tags: JSON.parse(String(claim.tags)),
       creative: JSON.parse(String(claim.creative_json || "{}")),
+      images: reviewImages,
       version: claim.version_number,
       approved_at: now,
     }) : null;

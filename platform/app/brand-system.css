@@ -176,6 +176,388 @@ a:focus-visible {
   color: var(--brand-white);
 }
 
+.sidebar-bottom {
+  position: relative;
+}
+
+.profile > button svg {
+  transition: transform 160ms ease;
+}
+
+.profile > button svg.open {
+  transform: rotate(180deg);
+}
+
+.profile-menu {
+  position: absolute;
+  z-index: 12;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
+  overflow: hidden;
+  padding: 7px;
+  border: 1px solid #424b58;
+  border-radius: 11px;
+  background: #252b34;
+  box-shadow: 0 16px 34px rgb(0 0 0 / 28%);
+}
+
+.profile-menu > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 9px 10px;
+  color: #f2f2f0;
+}
+
+.profile-menu small {
+  color: #9ca3ad;
+  font-size: 9px;
+}
+
+.profile-menu button {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #62404a;
+  border-radius: 8px;
+  background: #342a2f;
+  color: #ffbdc8;
+  font-weight: 700;
+  text-align: center;
+}
+
+.profile-menu button:hover {
+  background: #493039;
+  color: #ffffff;
+}
+
+.creation-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 11px;
+  padding: 10px 12px;
+  border: 1px solid #d7ddea;
+  border-radius: 9px;
+  background: #ffffff;
+  color: var(--ink);
+}
+
+.creation-progress > i {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  border: 2px solid #d8deeb;
+  border-top-color: var(--brand-primary);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+
+.creation-progress > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.creation-progress strong {
+  font-size: 10px;
+}
+
+.creation-progress span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+/* 我的内容统一交给页面滚动，避免三栏各自截获滚轮造成跳顿。 */
+.view-content .creative-task-list,
+.view-content .visual-builder {
+  position: static;
+  top: auto;
+  max-height: none;
+  overflow: visible;
+  overscroll-behavior: auto;
+}
+
+.content-hierarchy-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.content-page-intro {
+  padding: 4px 2px 2px;
+}
+
+.content-page-intro h2 {
+  margin: 7px 0 6px;
+  color: var(--ink);
+  font-size: 22px;
+}
+
+.content-page-intro p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.content-account-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.content-account-overview-card {
+  position: relative;
+  width: 100%;
+  padding: 22px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--ink);
+  text-align: left;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.content-account-overview-card:hover {
+  transform: translateY(-2px);
+  border-color: #b8c3e7;
+  box-shadow: 0 14px 32px rgb(31 45 78 / 10%);
+}
+
+.content-account-overview-card:focus-visible,
+.content-task-card:focus-visible,
+.content-breadcrumb button:focus-visible {
+  outline: 3px solid rgb(79 99 216 / 24%);
+  outline-offset: 2px;
+}
+
+.content-account-overview-card .account-bio {
+  min-height: 36px;
+  margin: 17px 0 13px;
+}
+
+.content-account-counts {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid #e3e7ef;
+  border-radius: 10px;
+  background: #e3e7ef;
+}
+
+.content-account-counts span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 5px;
+  background: #f7f8fb;
+  color: var(--muted);
+  font-size: 8px;
+  text-align: center;
+}
+
+.content-account-counts strong {
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.content-account-overview-card > footer,
+.content-task-card > footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 15px;
+  padding-top: 13px;
+  border-top: 1px solid #eceff4;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.content-account-overview-card > footer strong,
+.content-task-card > footer strong {
+  color: var(--brand-action);
+}
+
+.content-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.content-breadcrumb button {
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid #d9deea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--brand-action);
+  font-weight: 700;
+}
+
+.content-account-summary {
+  padding: 20px 22px;
+}
+
+.content-account-summary .account-profile-head > div p {
+  white-space: normal;
+  line-height: 1.55;
+}
+
+.content-task-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.content-task-card {
+  width: 100%;
+  min-height: 180px;
+  padding: 19px 20px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--ink);
+  text-align: left;
+}
+
+.content-task-card:hover {
+  border-color: #bcc6e8;
+  background: #fafbff;
+}
+
+.content-task-card > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.content-task-card time {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.content-task-card h3 {
+  margin: 17px 0 8px;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.content-task-card > p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.7;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.content-editor-shell {
+  grid-template-columns: minmax(460px, 1fr) minmax(330px, 420px);
+}
+
+.review-image-uploader {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 4px 0 18px;
+  padding: 16px;
+  border: 1px solid #dce2ee;
+  border-radius: 12px;
+  background: #f8faff;
+}
+
+.review-image-uploader > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.review-image-uploader strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.review-image-uploader span,
+.review-image-uploader > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.review-image-uploader .upload-button {
+  align-self: flex-start;
+}
+
+.review-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 9px;
+}
+
+.review-image-grid img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border: 1px solid #dce1eb;
+  border-radius: 9px;
+  background: #eef1f6;
+  object-fit: cover;
+}
+
+.review-center-images {
+  grid-template-columns: repeat(auto-fill, minmax(110px, 150px));
+  margin: 14px 0;
+}
+
+.review-center-images a {
+  border-radius: 9px;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.review-center-images a:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgb(31 45 78 / 14%);
+}
+
+.review-missing-images {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid #f0c8d0;
+  border-radius: 9px;
+  background: #fff4f6;
+  color: #b43c55;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.publish-preview-images {
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  margin-bottom: 14px;
+}
+
+@media (max-width: 1050px) {
+  .content-account-overview-grid,
+  .content-task-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .content-editor-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .content-editor-shell .visual-builder {
+    grid-column: 1;
+  }
+}
+
 .workspace {
   width: 100%;
   max-width: 1540px;
@@ -827,6 +1209,48 @@ h1 {
 .loading-page span,
 .workflow-progress i {
   border-top-color: var(--brand-primary);
+}
+
+/* 浅色爆款搜索区中的长任务状态必须保持可读，不继承旧深色横幅的白字。 */
+.view-trends .workflow-progress {
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px solid #cbd3e6;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #263247;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.45;
+  box-shadow: 0 4px 12px rgb(31 45 78 / 7%);
+}
+
+.view-trends .workflow-progress span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.view-trends .workflow-progress i {
+  flex: 0 0 auto;
+  border-color: #d8deeb;
+  border-top-color: var(--brand-primary);
+}
+
+.danger-confirm {
+  height: 39px;
+  padding: 0 16px;
+  border: 1px solid #b83c52;
+  border-radius: var(--radius-control);
+  background: #b83c52;
+  color: #ffffff;
+  font-weight: 750;
+}
+
+.danger-confirm:disabled {
+  opacity: .58;
+  cursor: wait;
 }
 
 .toast {
