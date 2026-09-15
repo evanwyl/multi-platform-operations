@@ -52,7 +52,7 @@ test("makes dashboard summaries and recent tasks real navigation controls", asyn
   assert.match(source, /label="等待审核"[\s\S]*setView\("review"\)/);
   assert.match(source, /label="累计已发布"[\s\S]*setView\("publish"\)/);
   assert.match(source, /className="task-row"[\s\S]*onClick=\{\(\) => openClaim\(claim\)\}/);
-  assert.match(source, /useState\(initialTarget\?\.account_id \?\? ""\)/);
+  assert.match(source, /useState\(initialTarget\?\.account_id \?\? initialAccountId \?\? ""\)/);
   assert.match(source, /useState\(initialTarget\?\.id \?\? ""\)/);
   assert.match(source, /function Metric[\s\S]*<button type="button"/);
   assert.match(styles, /\.metrics \.metric-card:hover/);
@@ -205,10 +205,9 @@ test("allows adding a sample topic without entering a replacement title", async 
   assert.doesNotMatch(route, /请填写原创选题标题/);
 });
 
-test("supports bulk sample transfer and keeps the team topic library independently scrollable", async () => {
+test("supports bulk sample transfer and keeps the topic center on one page scrollbar", async () => {
   const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
   const route = await readFile(new URL("../app/api/trends/route.ts", import.meta.url), "utf8");
-  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.match(source, /create_topics_bulk/);
   assert.match(source, /全选当前列表/);
   assert.match(source, /批量转入选题中心/);
@@ -218,8 +217,9 @@ test("supports bulk sample transfer and keeps the team topic library independent
   assert.match(route, /action === "create_topics_bulk"/);
   assert.match(route, /sample\.status !== "new"/);
   assert.match(route, /UPDATE trend_samples SET status='used'/);
-  assert.match(styles, /\.creation-strip\+\.data-panel>\.topic-cards\{[^}]*overflow-y:auto/);
-  assert.match(styles, /\.page-stack:has\(> \.creation-strip\)/);
+  const theme = await readFile(new URL("../app/product-theme.css", import.meta.url), "utf8");
+  assert.match(theme, /\.view-topics \.platform-topic-page\s*\{[^}]*height: auto;[^}]*overflow: visible;/s);
+  assert.match(theme, /\.view-topics \.platform-topic-page > \.data-panel > \.topic-cards\s*\{[^}]*overflow: visible;/s);
 });
 
 test("uses account-aware quality gates without automatically writing to the topic center", async () => {
@@ -381,8 +381,36 @@ test("shows complete content task labels and separates review from real publishi
   const publishRoute = await readFile(new URL("../app/api/publish/route.ts", import.meta.url), "utf8");
   const manager = await readFile(new URL("../runtime/manager.mjs", import.meta.url), "utf8");
   assert.match(source, /claim\.title \|\| claim\.topic_title/);
-  assert.match(source, /\["review", CheckCircle, "审核中心"\]/);
-  assert.match(source, /\["publish", PaperPlaneTilt, "发布列表"\]/);
+  assert.match(source, /nav-group-label">平台选择/);
+  assert.doesNotMatch(source, /平台快捷入口/);
+  assert.doesNotMatch(source, /function PlatformCenter/);
+  assert.doesNotMatch(source, /function PlatformWorkspace/);
+  assert.match(source, /nav-group-label">总览/);
+  assert.match(source, />工作台<\/button>/);
+  assert.doesNotMatch(source, /goPlatformView\("dashboard"/);
+  assert.match(source, />爆款搜索<\/button>/);
+  assert.match(source, />选题中心<\/button>/);
+  assert.doesNotMatch(source, /platform-source-note/);
+  assert.match(source, /知乎专栏选题库/);
+  assert.match(source, /小红书图文选题库/);
+  assert.match(source, /platform=\{scopePlatform \|\| "xiaohongshu"\}/);
+  assert.doesNotMatch(source, /newTopicPlatform/);
+  assert.match(source, />我的内容<\/button>/);
+  assert.match(source, /审核中心/);
+  assert.match(source, /发布列表/);
+  assert.match(source, />账号管理\{accounts\.length \? <b>\{accounts\.length\}<\/b> : null\}<\/button>/);
+  assert.match(source, /\["xiaohongshu", "zhihu", "wechat"\]/);
+  assert.match(source, /fixed-platform-field/);
+  assert.doesNotMatch(source, /<select name="platform">/);
+  assert.match(source, /微信公众号/);
+  assert.match(source, /sidebar-account-section/);
+  assert.match(source, /platform-account-children/);
+  assert.doesNotMatch(source, /platform-account-label/);
+  assert.match(source, /发布设计中/);
+  assert.match(source, /审核可以继续，正式发布暂不开放/);
+  assert.doesNotMatch(source, /account-action-grid/);
+  assert.match(source, /账号资料与内容概览/);
+  assert.match(source, /<h2>创作内容<\/h2>/);
   assert.match(source, /通过图文并转入发布/);
   assert.match(source, /确认并发布审核图文/);
   assert.match(source, /查看内容/);
@@ -407,7 +435,9 @@ test("uses one restrained product theme and one consistent icon family", async (
   assert.match(source, /<NavIcon aria-hidden="true" size=\{18\}/);
   assert.match(source, /<MetricIcon aria-hidden="true" size=\{19\}/);
   assert.match(source, /className="skip-link" href="#main-content"/);
-  assert.match(source, /aria-current=\{view === id \? "page" : undefined\}/);
+  assert.match(source, /aria-current=\{active \? "page" : undefined\}/);
+  assert.match(source, /nav-group-label">平台选择/);
+  assert.match(source, /账号资料与内容概览/);
   assert.doesNotMatch(source, /<header className=\{`topbar/);
   assert.doesNotMatch(source, />新建内容<\/button>/);
   assert.match(source, /task-table-head/);

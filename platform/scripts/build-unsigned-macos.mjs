@@ -2,10 +2,11 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync,
-  readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync,
+  readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { chromium } from "playwright-core";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const outputRoot = resolve(projectRoot, "outputs");
@@ -35,11 +36,30 @@ function assertPortableSymlinks(root) {
   }
 }
 
+function makeCopiedSymlinksPortable(root, originalRoot, copiedRoot = root) {
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = resolve(root, entry.name);
+    if (entry.isSymbolicLink()) {
+      const target = readlinkSync(path);
+      if (!isAbsolute(target)) continue;
+      const originalRelativeTarget = relative(originalRoot, target);
+      if (originalRelativeTarget.startsWith("..")) throw new Error(`Chromium 包含指向包外的绝对符号链接：${path} -> ${target}`);
+      const copiedTarget = resolve(copiedRoot, originalRelativeTarget);
+      const portableTarget = relative(dirname(path), copiedTarget);
+      unlinkSync(path);
+      symlinkSync(portableTarget, path);
+    } else if (entry.isDirectory()) {
+      makeCopiedSymlinksPortable(path, originalRoot, copiedRoot);
+    }
+  }
+}
+
 function assertNoCustomerData(root) {
   const forbiddenDirectories = [
     "Contents/Resources/app/.wrangler",
     "Contents/Resources/app/backups",
     "Contents/Resources/app/runtime/accounts",
+    "Contents/Resources/app/runtime/platform-accounts",
     "Contents/Resources/app/runtime/analysis",
     "Contents/Resources/app/runtime/config",
     "Contents/Resources/app/runtime/generated",
@@ -100,10 +120,17 @@ for (const privateAsset of ["generated", "trend-covers"]) {
 mkdirSync(resolve(packagedApp, "runtime"), { recursive: true });
 copyFileSync(resolve(projectRoot, "runtime/manager.mjs"), resolve(packagedApp, "runtime/manager.mjs"));
 cpSync(resolve(projectRoot, "runtime/prompts"), resolve(packagedApp, "runtime/prompts"), { recursive: true });
-for (const schema of ["trend-plan.schema.json", "candidate-screen.schema.json", "topic-analysis.schema.json", "content-draft.schema.json"]) {
+cpSync(resolve(projectRoot, "runtime/platforms"), resolve(packagedApp, "runtime/platforms"), { recursive: true });
+for (const schema of ["trend-plan.schema.json", "candidate-screen.schema.json", "topic-analysis.schema.json", "content-draft.schema.json", "zhihu-article-draft.schema.json"]) {
   copyFileSync(resolve(projectRoot, "runtime", schema), resolve(packagedApp, "runtime", schema));
 }
 cpSync(resolve(projectRoot, "runtime/bin"), resolve(packagedApp, "runtime/bin"), { recursive: true });
+const chromiumExecutable = chromium.executablePath();
+if (!existsSync(chromiumExecutable)) throw new Error("缺少 Playwright Chromium，请先运行 npx playwright-core install chromium");
+const chromiumBundle = resolve(chromiumExecutable, "../../..");
+const packagedChromium = resolve(packagedApp, "runtime/bin/chromium/Chromium.app");
+cpSync(chromiumBundle, packagedChromium, { recursive: true });
+makeCopiedSymlinksPortable(packagedChromium, chromiumBundle);
 mkdirSync(resolve(packagedApp, "scripts"), { recursive: true });
 for (const script of ["app-service.mjs", "backup-local.mjs", "restore-local.mjs"]) {
   copyFileSync(resolve(projectRoot, "scripts", script), resolve(packagedApp, "scripts", script));
@@ -118,7 +145,7 @@ const runtimePackage = {
   version,
   private: true,
   type: "module",
-  dependencies: { wrangler: "4.92.0" },
+  dependencies: { wrangler: "4.92.0", "playwright-core": "1.55.0" },
 };
 writeFileSync(resolve(packagedApp, "package.json"), `${JSON.stringify(runtimePackage, null, 2)}\n`);
 run("npm", ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: packagedApp });
@@ -130,7 +157,12 @@ chmodSync(resolve(resources, "runtime/node"), 0o755);
 copyFileSync(resolve(nodeRoot, "LICENSE"), resolve(resources, "runtime/LICENSE.Node.txt"));
 writeFileSync(resolve(resources, "runtime/NODE_VERSION.txt"), `${process.version} / ${process.arch}\n`);
 
-copyFileSync(resolve(projectRoot, "packaging/Info.plist"), resolve(contents, "Info.plist"));
+const plistPath = resolve(contents, "Info.plist");
+const bundleBuildVersion = String(Number(version.split(".").join("")));
+const plist = readFileSync(resolve(projectRoot, "packaging/Info.plist"), "utf8")
+  .replace(/(<key>CFBundleShortVersionString<\/key>\s*<string>)[^<]+/, `$1${version}`)
+  .replace(/(<key>CFBundleVersion<\/key>\s*<string>)[^<]+/, `$1${bundleBuildVersion}`);
+writeFileSync(plistPath, plist);
 writeFileSync(resolve(contents, "PkgInfo"), "APPL????");
 run("/usr/bin/clang", [
   "-O2", "-fobjc-arc", "-mmacosx-version-min=13.0",

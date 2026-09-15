@@ -20,7 +20,7 @@ type ClaimContext = {
   topic_title: string; account_name: string; persona: string; audience: string;
   brief: string; target_audience: string; pain_point: string; hook_points: string;
   content_structure: string; why_it_works: string; account_fit: string;
-  source_feed_ids: string;
+  source_feed_ids: string; account_platform: string; content_type: string;
 };
 
 type SourceReference = {
@@ -50,14 +50,15 @@ function normalizeImagePrompt(value: unknown, index: number): ImagePrompt {
   };
 }
 
-function normalizeCreative(value: unknown): CreativeDraft {
+function normalizeCreative(value: unknown, contentType = "xiaohongshu_note"): CreativeDraft {
   const draft = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
-  const directPrompts = (Array.isArray(draft.image_prompts) ? draft.image_prompts : []).slice(0, 6).map(normalizeImagePrompt).filter((item) => item.prompt);
+  const longArticle = contentType === "zhihu_article" || contentType === "zhihu_answer" || contentType === "wechat_article";
+  const directPrompts = (Array.isArray(draft.image_prompts) ? draft.image_prompts : []).slice(0, longArticle ? 8 : 6).map(normalizeImagePrompt).filter((item) => item.prompt);
   return {
-    title_options: textList(draft.title_options, 6).map((item) => item.slice(0, 20)),
-    title: String(draft.title ?? "").trim().slice(0, 20),
-    body: String(draft.body ?? "").trim().slice(0, 1200),
-    tags: textList(draft.tags, 10).map((item) => item.slice(0, 16)),
+    title_options: textList(draft.title_options, 6).map((item) => item.slice(0, longArticle ? 100 : 20)),
+    title: String(draft.title ?? "").trim().slice(0, longArticle ? 100 : 20),
+    body: String(draft.body ?? "").trim().slice(0, longArticle ? 20000 : 1200),
+    tags: textList(draft.tags, 10).map((item) => item.slice(0, longArticle ? 32 : 16)),
     image_prompts: directPrompts,
     creative_note: String(draft.creative_note ?? "").trim().slice(0, 300),
   };
@@ -75,7 +76,7 @@ function enforceCoverTitle(draft: CreativeDraft): CreativeDraft {
 }
 
 async function claimContext(id: string) {
-  return database().prepare(`SELECT c.*,t.title AS topic_title,a.name AS account_name,a.persona,a.audience,
+  return database().prepare(`SELECT c.*,t.title AS topic_title,a.name AS account_name,a.platform AS account_platform,a.persona,a.audience,
     COALESCE(i.brief,'') AS brief,COALESCE(i.target_audience,'') AS target_audience,
     COALESCE(i.pain_point,'') AS pain_point,COALESCE(i.hook_points,'[]') AS hook_points,
     COALESCE(i.content_structure,'[]') AS content_structure,COALESCE(i.why_it_works,'') AS why_it_works,
@@ -91,6 +92,11 @@ async function sourceReferences(claim: ClaimContext) {
     const sample = await database().prepare(`SELECT feed_id,title,author_name,source_url,detail_text FROM trend_samples
       WHERE feed_id=? AND processing_status='success' AND detail_text!=''`).bind(feedId).first<SourceReference>();
     if (sample) references.push({ ...sample, detail_text: String(sample.detail_text).slice(0, 4000) });
+    if (!sample && feedId.startsWith("article:")) {
+      const article = await database().prepare(`SELECT id AS feed_id,title,author_name,source_url,detail_text FROM article_research_samples
+        WHERE id=? AND processing_status='success' AND detail_text!=''`).bind(feedId.slice(8)).first<SourceReference>();
+      if (article) references.push({ ...article, feed_id: feedId, detail_text: String(article.detail_text).slice(0, 6000) });
+    }
   }
   return references;
 }
@@ -103,7 +109,7 @@ function canEdit(user: DbUser, claim: ClaimContext) {
   return canView(user, claim) && can(user, roleGroups.operate);
 }
 
-async function runAI<T>(kind: "content-draft", prompt: string) {
+async function runAI<T>(kind: "content-draft" | "zhihu-article-draft", prompt: string) {
   let response: Response;
   try {
     response = await managerFetch("/ai/run", {
@@ -163,6 +169,25 @@ export async function POST(request: Request) {
   if (action === "generate") {
     const instruction = String(data.instruction ?? "").trim().slice(0, 500);
     const references = await sourceReferences(claim);
+    if (claim.content_type === "zhihu_article" || claim.content_type === "wechat_article") {
+      const platformName = claim.content_type === "wechat_article" ? "微信公众号" : "知乎专栏";
+      const audienceName = claim.content_type === "wechat_article" ? "公众号读者" : "关注这个问题的知乎读者";
+      const creationBrief = claim.content_type === "wechat_article" ? "微信公众号创作" : "知乎专栏创作";
+      const prompt = `你正在进行${creationBrief}，请完成一篇文章。\n\n选题：${claim.topic_title}\n发布账号：${claim.account_name}\n账号定位：${claim.persona || "未填写，按选题自然表达"}\n目标读者：${claim.audience || claim.target_audience || audienceName}\n认领角度：${claim.angle || "结合账号定位自然展开"}\n选题摘要：${claim.brief || "无"}\n用户痛点：${claim.pain_point || "无"}\n建议结构：${parseJson<string[]>(claim.content_structure, []).join(" → ") || "自行建立清晰论证结构"}\n审核意见：${claim.review_comment || "无"}\n本次补充要求：${instruction || "无"}\n真实来源正文：${references.length ? `共${references.length}条，见下方 <UNTRUSTED_SOURCE_NOTES>` : "没有已验证来源正文，不得补写来源事实"}\n\n要求：输出一篇适合${platformName}的原创长文，标题具体可信，正文至少包含问题界定、主体论证和结论；不要写 HTML，不要复制来源。严格按 JSON Schema 返回。\n\n<UNTRUSTED_SOURCE_NOTES>\n${JSON.stringify(references)}\n</UNTRUSTED_SOURCE_NOTES>`;
+      await database().prepare("UPDATE claims SET creation_status='generating',creation_error='',creation_prompt=?,updated_at=? WHERE id=?")
+        .bind(prompt, new Date().toISOString(), id).run();
+      try {
+        const result = normalizeCreative(await runAI<CreativeDraft>("zhihu-article-draft", prompt), claim.content_type);
+        if (!result.title || !result.body) throw new Error(`AI 返回的${platformName}标题或正文不完整`);
+        claim = await claimContext(id) as ClaimContext;
+        const version = await saveVersion(user, claim, result, "ai");
+        return Response.json({ ok: true, creative: result, version });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "AI 创作失败";
+        await database().prepare("UPDATE claims SET creation_status='error',creation_error=?,updated_at=? WHERE id=?").bind(message, new Date().toISOString(), id).run();
+        return Response.json({ error: message }, { status: 502 });
+      }
+    }
     const prompt = `你是小红书资深内容编辑和视觉策划。请在同一次任务中，为一个真实团队完成一篇原创小红书图文笔记及其整套配图提示词。
 
 选题：${claim.topic_title}
@@ -200,7 +225,7 @@ ${JSON.stringify(references)}
     await database().prepare("UPDATE claims SET creation_status='generating',creation_error='',creation_prompt=?,updated_at=? WHERE id=?")
       .bind(prompt, new Date().toISOString(), id).run();
     try {
-      const result = enforceCoverTitle(normalizeCreative(await runAI<CreativeDraft>("content-draft", prompt)));
+      const result = enforceCoverTitle(normalizeCreative(await runAI<CreativeDraft>("content-draft", prompt), claim.content_type));
       if (!result.title || !result.body || result.image_prompts.length < 3) throw new Error("AI 返回的图文稿或图片提示词不完整");
       claim = await claimContext(id) as ClaimContext;
       const version = await saveVersion(user, claim, result, "ai");
@@ -214,7 +239,7 @@ ${JSON.stringify(references)}
   }
 
   if (action === "save") {
-    const draft = enforceCoverTitle(normalizeCreative(data.creative));
+    const draft = claim.content_type === "xiaohongshu_note" ? enforceCoverTitle(normalizeCreative(data.creative, claim.content_type)) : normalizeCreative(data.creative, claim.content_type);
     if (!draft.title || !draft.body) return Response.json({ error: "标题和正文不能为空" }, { status: 400 });
     const version = await saveVersion(user, claim, draft, "manual");
     return Response.json({ ok: true, creative: draft, version });
@@ -225,7 +250,7 @@ ${JSON.stringify(references)}
     const version = await database().prepare("SELECT * FROM claim_versions WHERE claim_id=? AND version_number=?")
       .bind(id, versionNumber).first<{ creative_json: string }>();
     if (!version) return Response.json({ error: "历史版本不存在" }, { status: 404 });
-    const creative = enforceCoverTitle(normalizeCreative(parseJson(version.creative_json, {})));
+    const creative = claim.content_type === "xiaohongshu_note" ? enforceCoverTitle(normalizeCreative(parseJson(version.creative_json, {}), claim.content_type)) : normalizeCreative(parseJson(version.creative_json, {}), claim.content_type);
     const nextVersion = await saveVersion(user, claim, creative, "restore");
     return Response.json({ ok: true, creative, version: nextVersion });
   }

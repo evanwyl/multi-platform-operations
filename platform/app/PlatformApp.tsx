@@ -3,6 +3,7 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import {
+  ArrowRight,
   Bell,
   CaretDown,
   CheckCircle,
@@ -13,18 +14,20 @@ import {
   ListMagnifyingGlass,
   PaperPlaneTilt,
   PenNib,
+  Plus,
   TrendUp,
   UsersThree,
   type Icon,
 } from "@phosphor-icons/react";
 
 type User = { id: string; name: string; username: string; roles: string[] };
-type Account = { id: string; name: string; status: string; color: string; queue_count: number; xhs_user_id?: string; xhs_nickname?: string; xhs_red_id?: string; profile_bio?: string; avatar_url?: string; following_count?: string; followers_count?: string; interaction_count?: string; note_count?: number; profile_synced_at?: string; persona?: string; audience?: string; content_pillars?: string[]; strategy_keywords?: string[]; excluded_topics?: string[] };
-type Topic = { id: string; title: string; source_url: string; relevance: string; status: string; creator_name: string; created_at: string; brief?: string; target_audience?: string; pain_point?: string; hook_points?: string[]; content_structure?: string[]; why_it_works?: string; account_fit?: string; source_feed_ids?: string[]; score?: number; source_author?: string; source_keyword?: string; liked_count?: string; collected_count?: string; comment_count?: string; heat_score?: number; captured_at?: string; note_published_at?: string; note_id?: string; source_processing_status?: string; source_detail_verified?: number; claim_status?: string; claim_owner_name?: string };
+type PlatformId = "xiaohongshu" | "zhihu" | "wechat";
+type Account = { id: string; name: string; status: string; color: string; queue_count: number; platform?: PlatformId; external_user_id?: string; external_display_name?: string; auth_method?: string; xhs_user_id?: string; xhs_nickname?: string; xhs_red_id?: string; profile_bio?: string; avatar_url?: string; following_count?: string; followers_count?: string; interaction_count?: string; note_count?: number; profile_synced_at?: string; persona?: string; audience?: string; content_pillars?: string[]; strategy_keywords?: string[]; excluded_topics?: string[] };
+type Topic = { id: string; title: string; source_url: string; relevance: string; status: string; platform?: PlatformId; source_type?: string; creator_name: string; created_at: string; brief?: string; target_audience?: string; pain_point?: string; hook_points?: string[]; content_structure?: string[]; why_it_works?: string; account_fit?: string; source_feed_ids?: string[]; score?: number; source_author?: string; source_keyword?: string; liked_count?: string; collected_count?: string; comment_count?: string; heat_score?: number; captured_at?: string; note_published_at?: string; note_id?: string; source_processing_status?: string; source_detail_verified?: number; claim_status?: string; claim_owner_name?: string };
 type ImagePrompt = { label: string; prompt: string };
 type CreativeDraft = { title_options: string[]; title: string; body: string; tags: string[]; image_prompts: ImagePrompt[]; creative_note: string };
 type CreativeVersion = { id: string; version_number: number; source: string; title: string; created_at: string };
-type Claim = { id: string; topic_id: string; topic_title: string; account_id: string; account_name: string; account_color: string; owner_id: string; owner_name: string; angle: string; status: string; status_label: string; title: string; body: string; tags: string[]; review_comment: string; updated_at: string; creative?: Partial<CreativeDraft>; creation_status?: string; creation_error?: string; version_number?: number; generated_at?: string; publish_images?: string[]; publish_error?: string; published_at?: string; publisher_id?: string; publisher_name?: string; publish_recoverable?: boolean; publish_snapshot?: { title?: string; body?: string; tags?: string[]; images?: string[]; approved_at?: string } | null };
+type Claim = { id: string; topic_id: string; topic_title: string; account_id: string; account_name: string; account_color: string; account_platform?: PlatformId; content_type?: "xiaohongshu_note" | "zhihu_article" | "zhihu_answer" | "wechat_article"; external_content_id?: string; published_url?: string; owner_id: string; owner_name: string; angle: string; status: string; status_label: string; title: string; body: string; tags: string[]; review_comment: string; updated_at: string; creative?: Partial<CreativeDraft>; creation_status?: string; creation_error?: string; version_number?: number; generated_at?: string; publish_images?: string[]; publish_error?: string; published_at?: string; publisher_id?: string; publisher_name?: string; publish_recoverable?: boolean; publish_snapshot?: { title?: string; body?: string; tags?: string[]; images?: string[]; approved_at?: string; content_type?: string } | null };
 type Log = { id: string; actor_name: string; action: string; object_type: string; detail: string; created_at: string };
 type AISettings = { configured: boolean; baseUrl: string; model: string; keySource: "environment" | "local" | "none"; busy?: boolean; unavailable?: boolean };
 type AppData = { user: User; accounts: Account[]; topics: Topic[]; claims: Claim[]; logs: Log[]; users: User[]; ai_settings: AISettings };
@@ -33,6 +36,8 @@ type TrendSample = { id: string; feed_id: string; keyword: string; matched_keywo
 type SearchPlan = { theme: string; intent_summary: string; primary_keyword: string; intent_phrase: string; scenario_terms: string[]; keywords: string[]; exclude_keywords: string[]; publish_time: string; sort_by: string; content_type: "image" | "video" | "all"; target_account_id: string; target_account_name: string };
 type TrendScan = { id: string; keywords: string[]; completed_keywords: string[]; status: string; result_count: number; error: string; started_at: string; completed_at?: string };
 type TrendData = { settings: TrendSettings; samples: TrendSample[]; scans: TrendScan[]; accounts: Account[] };
+type ArticleSample = { id: string; title: string; source_url: string; source_domain: string; author_name: string; matched_keywords: string[]; search_engines: string[]; snippet: string; detail_text: string; published_at?: string; best_rank: number; occurrence_count: number; relevance_score: number; trend_score: number; processing_status: string; detail_error: string; status: string; last_seen_at: string };
+type ArticleResearchData = { configured: boolean; endpoint: string; samples: ArticleSample[]; accounts: Account[] };
 type AuthData = { initialized: boolean; user: User | null };
 type TrendActionResult = {
   scan_id?: string; reused?: boolean; detail_sample_ids?: string[]; needs_analysis?: boolean;
@@ -42,17 +47,10 @@ type TrendActionResult = {
 type XhsActionResult = { image: string; text: string; unknown?: boolean; online?: boolean };
 
 const navItems: Array<[string, Icon, string]> = [
-  ["dashboard", House, "工作台"], ["trends", TrendUp, "爆款搜索"], ["topics", Lightbulb, "选题中心"], ["content", FileText, "我的内容"],
-  ["review", CheckCircle, "审核中心"], ["publish", PaperPlaneTilt, "发布列表"], ["accounts", UsersThree, "平台账号"], ["logs", ListMagnifyingGlass, "日志中心"], ["settings", GearSix, "系统设置"],
+  ["logs", ListMagnifyingGlass, "日志中心"], ["settings", GearSix, "系统设置"],
 ];
 
-const navGroups = [
-  { label: "内容运营", ids: ["dashboard", "trends", "topics", "content"] },
-  { label: "审核发布", ids: ["review", "publish"] },
-  { label: "平台管理", ids: ["accounts", "logs", "settings"] },
-];
-
-const accountStatus: Record<string, string> = { online: "在线", busy: "发布中", login_expired: "登录失效", unknown: "状态未知", paused: "已暂停", error: "异常" };
+const accountStatus: Record<string, string> = { online: "在线", auth_configured: "授权已配置", busy: "发布中", login_expired: "登录失效", unknown: "状态未知", paused: "已暂停", error: "异常" };
 const claimStatus: Record<string, string> = { writing: "创作中", review: "待审核", revision: "待修改", approved: "待发布", queued: "发布队列", publishing: "发布中", published: "已发布", failed: "发布失败" };
 const sampleProcessingStatus: Record<string, string> = { pending: "等待处理", detail_fetching: "正在获取详情", success: "成功", skipped: "跳过", detail_failed: "详情获取失败" };
 const sampleCaptureOutcome: Record<string, string> = { new: "新发现", duplicate: "已存在/重复" };
@@ -88,19 +86,28 @@ function withCoverTitle(creative: CreativeDraft): CreativeDraft {
   return { ...creative, image_prompts: [cover, ...creative.image_prompts.filter((_, itemIndex) => itemIndex !== index)] };
 }
 
+function platformLabel(platform?: string) { return platform === "zhihu" ? "知乎" : platform === "wechat" ? "微信公众号" : "小红书"; }
+function accountIdentitySummary(account: Account) {
+  if (account.platform === "wechat") return "微信公众号账号";
+  if (account.platform === "zhihu") return account.external_user_id ? "已配置知乎账号标识" : "尚未配置知乎授权";
+  return account.xhs_red_id ? `小红书号 ${account.xhs_red_id}` : account.xhs_user_id ? "已绑定小红书身份" : "尚未绑定小红书身份";
+}
+function isZhihuClaim(claim?: Claim) { return claim?.content_type === "zhihu_article" || claim?.content_type === "wechat_article" || claim?.account_platform === "zhihu" || claim?.account_platform === "wechat"; }
+
 function blankCreative(claim?: Claim): CreativeDraft {
   const saved = (claim?.creative ?? {}) as Partial<CreativeDraft>;
   const currentPrompts = Array.isArray(saved.image_prompts) ? saved.image_prompts
     .map((item) => ({ label: String(item.label ?? "配图建议"), prompt: String(item.prompt ?? "") }))
     .filter((item) => item.prompt) : [];
-  return withCoverTitle({
+  const creative = {
     title_options: Array.isArray(saved?.title_options) ? saved.title_options : [],
     title: saved?.title ?? claim?.title ?? "",
     body: saved?.body ?? claim?.body ?? "",
     tags: Array.isArray(saved?.tags) ? saved.tags : claim?.tags ?? [],
     image_prompts: currentPrompts.slice(0, 6),
     creative_note: saved?.creative_note ?? "",
-  });
+  };
+  return isZhihuClaim(claim) ? creative : withCoverTitle(creative);
 }
 
 export default function PlatformApp() {
@@ -108,6 +115,11 @@ export default function PlatformApp() {
   const [data, setData] = useState<AppData | null>(null);
   const [view, setView] = useState("dashboard");
   const [contentTargetId, setContentTargetId] = useState("");
+  const [contentAccountId, setContentAccountId] = useState("");
+  const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [scopePlatform, setScopePlatform] = useState<PlatformId | "">("");
+  const [scopeAccountId, setScopeAccountId] = useState("");
+  const [expandedPlatforms, setExpandedPlatforms] = useState<Record<PlatformId, boolean>>({ xiaohongshu: true, zhihu: false, wechat: false });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -147,15 +159,50 @@ export default function PlatformApp() {
   if (!auth.user) return <AuthPage mode="login" onSubmit={authSubmit} busy={busy} message={message} />;
   if (!data) return <div className="loading-page"><span></span><p>正在读取团队工作区…</p></div>;
 
-  const pendingReview = data.claims.filter((claim) => claim.status === "review").length;
-  const pendingPublish = data.claims.filter((claim) => ["approved", "queued", "publishing", "failed"].includes(claim.status)).length;
-  const unclaimed = data.topics.filter((topic) => topic.status === "unclaimed").length;
   const messageStartsWithSuccess = /^(已|正文补抓与拆解完成|内容已)/.test(message);
   const messageHasWarning = messageStartsWithSuccess && /(不可用|仍需|已保留|跳过|超时)/.test(message);
   const messageHasError = !messageStartsWithSuccess && /(失败|不能|没有|无法|错误|中断)/.test(message);
+  const scopedData: AppData = scopePlatform ? {
+    ...data,
+    accounts: data.accounts.filter((account) => (account.platform || "xiaohongshu") === scopePlatform && (!scopeAccountId || account.id === scopeAccountId)),
+    topics: data.topics.filter((topic) => (topic.platform || "xiaohongshu") === scopePlatform),
+    claims: data.claims.filter((claim) => (claim.account_platform || "xiaohongshu") === scopePlatform && (!scopeAccountId || claim.account_id === scopeAccountId)),
+  } : data;
+
+  function goPlatformView(target: string, platform: PlatformId, accountId = "") {
+    setScopePlatform(platform);
+    setScopeAccountId(accountId);
+    setExpandedPlatforms((current) => ({ ...current, [platform]: true }));
+    if (target === "content") {
+      setContentAccountId(accountId);
+      setContentTargetId("");
+    }
+    setView(target);
+  }
+
+  function openAccount(accountId: string) {
+    const account = data?.accounts.find((item) => item.id === accountId);
+    setScopePlatform((account?.platform || "xiaohongshu") as PlatformId);
+    setScopeAccountId(accountId);
+    setSelectedAccountId(accountId);
+    setView("account-workspace");
+  }
+
+  function openAccountContent(accountId: string, claimId = "") {
+    const account = data?.accounts.find((item) => item.id === accountId);
+    setScopePlatform((account?.platform || "xiaohongshu") as PlatformId);
+    setScopeAccountId(accountId);
+    setContentAccountId(accountId);
+    setContentTargetId(claimId);
+    setView("content");
+  }
 
   function openDashboardClaim(claim: Claim) {
+    const platform = (claim.account_platform || "xiaohongshu") as PlatformId;
+    setScopePlatform(platform);
     if (["writing", "revision"].includes(claim.status)) {
+      setScopeAccountId(claim.account_id);
+      setContentAccountId(claim.account_id);
       setContentTargetId(claim.id);
       setView("content");
       return;
@@ -169,7 +216,26 @@ export default function PlatformApp() {
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark"><FileText aria-hidden="true" size={23} weight="bold" /></span><div><strong>内容运营台</strong><small>多平台内容运营中台</small></div></div>
         <nav aria-label="主要导航">
-          {navGroups.map((group) => <div className="nav-group" key={group.label}><span className="nav-group-label">{group.label}</span>{group.ids.map((id) => { const item = navItems.find(([itemId]) => itemId === id); if (!item) return null; const [, NavIcon, label] = item; return <button key={id} className={`nav-item ${view === id ? "active" : ""}`} aria-current={view === id ? "page" : undefined} onClick={() => setView(id)}><span><NavIcon aria-hidden="true" size={18} weight={view === id ? "fill" : "regular"} /></span>{label}{id === "topics" && unclaimed > 0 ? <b>{unclaimed}</b> : null}{id === "review" && pendingReview > 0 ? <b>{pendingReview}</b> : null}{id === "publish" && pendingPublish > 0 ? <b>{pendingPublish}</b> : null}</button>; })}</div>)}
+          <div className="nav-group"><span className="nav-group-label">总览</span><button className={`nav-item ${view === "dashboard" ? "active" : ""}`} aria-current={view === "dashboard" ? "page" : undefined} onClick={() => { setScopePlatform(""); setScopeAccountId(""); setSelectedAccountId(""); setView("dashboard"); }}><span><House aria-hidden="true" size={18} weight={view === "dashboard" ? "fill" : "regular"} /></span>工作台</button></div>
+          <div className="nav-group platform-accordion-group"><span className="nav-group-label">平台选择</span>{(["xiaohongshu", "zhihu", "wechat"] as const).map((platform) => {
+            const xhs = platform === "xiaohongshu"; const name = platformLabel(platform); const glyph = xhs ? "小" : platform === "zhihu" ? "知" : "微"; const expanded = expandedPlatforms[platform]; const accounts = data.accounts.filter((account) => (account.platform || "xiaohongshu") === platform); const active = scopePlatform === platform;
+            return <div className={`platform-accordion channel-${platform} ${active ? "current" : ""}`} key={platform}><button type="button" className="platform-accordion-trigger" aria-expanded={expanded} onClick={() => setExpandedPlatforms((current) => ({ ...current, [platform]: !current[platform] }))}><span className="platform-mini-mark" aria-hidden="true">{glyph}</span><strong>{name}</strong><small>{accounts.length}</small><CaretDown aria-hidden="true" size={14} className={expanded ? "open" : ""} /></button>{expanded ? <div className="platform-accordion-panel">
+              {xhs ? <button className={view === "trends" && active ? "active" : ""} onClick={() => goPlatformView("trends", platform)}><TrendUp aria-hidden="true" size={15} />爆款搜索</button> : null}
+              {platform === "zhihu" ? <button className={view === "trends" && active ? "active" : ""} onClick={() => goPlatformView("trends", platform)}><TrendUp aria-hidden="true" size={15} />SEO选题搜索</button> : null}
+              <button className={view === "topics" && active ? "active" : ""} onClick={() => goPlatformView("topics", platform)}><Lightbulb aria-hidden="true" size={15} />选题中心</button>
+              <button className={view === "content" && active && !scopeAccountId ? "active" : ""} onClick={() => goPlatformView("content", platform)}><FileText aria-hidden="true" size={15} />我的内容</button>
+              <button className={view === "review" && active ? "active" : ""} onClick={() => goPlatformView("review", platform)}><CheckCircle aria-hidden="true" size={15} />审核中心{data.claims.filter((claim) => (claim.account_platform || "xiaohongshu") === platform && claim.status === "review").length ? <b>{data.claims.filter((claim) => (claim.account_platform || "xiaohongshu") === platform && claim.status === "review").length}</b> : null}</button>
+              {platform !== "wechat" ? <button className={view === "publish" && active ? "active" : ""} onClick={() => goPlatformView("publish", platform)}><PaperPlaneTilt aria-hidden="true" size={15} />发布列表{data.claims.filter((claim) => (claim.account_platform || "xiaohongshu") === platform && ["approved", "queued", "publishing", "failed"].includes(claim.status)).length ? <b>{data.claims.filter((claim) => (claim.account_platform || "xiaohongshu") === platform && ["approved", "queued", "publishing", "failed"].includes(claim.status)).length}</b> : null}</button> : <button className="coming" onClick={() => goPlatformView("publish", platform)}><PaperPlaneTilt aria-hidden="true" size={15} />发布设计中<em>规划中</em></button>}
+              <div className="sidebar-account-section">
+                <button className={`platform-account-heading ${view === "accounts" && active ? "active" : ""}`} onClick={() => goPlatformView("accounts", platform)}><UsersThree aria-hidden="true" size={15} />账号管理{accounts.length ? <b>{accounts.length}</b> : null}</button>
+                <div className="platform-account-children" aria-label={`${name}账号`}>
+                  {accounts.map((account) => { const displayName = account.external_display_name || account.xhs_nickname || account.name; return <button className={`platform-account-nav ${scopeAccountId === account.id ? "active" : ""}`} key={account.id} onClick={() => openAccount(account.id)}><i style={{ background: account.color }}>{displayName.slice(0, 1)}</i><span>{displayName}</span></button>; })}
+                  {!accounts.length ? <button className="platform-manage-link" onClick={() => goPlatformView("accounts", platform)}><Plus aria-hidden="true" size={14} />添加{name}账号</button> : null}
+                </div>
+              </div>
+            </div> : null}</div>;
+          })}</div>
+          <div className="nav-group"><span className="nav-group-label">团队与系统</span>{navItems.map(([id, NavIcon, label]) => { const active = view === id; return <button key={id} className={`nav-item ${active ? "active" : ""}`} aria-current={active ? "page" : undefined} onClick={() => setView(id)}><span><NavIcon aria-hidden="true" size={18} weight={active ? "fill" : "regular"} /></span>{label}</button>; })}</div>
         </nav>
         <div className="sidebar-bottom">{profileMenuOpen ? <div className="profile-menu" role="menu" aria-label="账户菜单"><div><strong>{data.user.name}</strong><small>@{data.user.username}</small></div><button type="button" role="menuitem" onClick={logout}>退出登录</button></div> : null}<div className="profile"><div className="avatar">{data.user.name.slice(0, 1)}</div><div><strong>{data.user.name}</strong><small>{roleLabel(data.user.roles)}</small></div><button type="button" onClick={() => setProfileMenuOpen((open) => !open)} aria-expanded={profileMenuOpen} aria-haspopup="menu" aria-label={profileMenuOpen ? "收起账户菜单" : "展开账户菜单"} title="账户菜单"><CaretDown className={profileMenuOpen ? "open" : ""} aria-hidden="true" size={17} weight="bold" /></button></div></div>
       </aside>
@@ -177,22 +243,54 @@ export default function PlatformApp() {
         {message ? <div className={`toast ${messageHasError ? "bad" : messageHasWarning ? "warn" : ""}`}><span>{message}</span><button onClick={() => setMessage("")}>×</button></div> : null}
         <div className="workspace-content">
           {view === "dashboard" && <Dashboard data={data} setView={setView} openClaim={openDashboardClaim} />}
+          {view === "account-workspace" && <AccountWorkspace accountId={selectedAccountId} data={data} setView={setView} openContent={openAccountContent} />}
           <div className="persistent-view" hidden={view !== "trends"} aria-hidden={view !== "trends"}>
-            <Trends reloadApp={loadData} notify={setMessage} />
+            {scopePlatform === "zhihu" ? <ArticleResearch reloadApp={loadData} notify={setMessage} /> : <Trends reloadApp={loadData} notify={setMessage} />}
           </div>
-          {view === "topics" && <Topics data={data} action={action} busy={busy} />}
+          {view === "topics" && <Topics platform={scopePlatform || "xiaohongshu"} data={scopedData} action={action} busy={busy} />}
           <div className="persistent-view" hidden={view !== "content"} aria-hidden={view !== "content"}>
-            <Content key={contentTargetId || "content-default"} data={data} action={action} busy={busy} reload={loadData} notify={setMessage} targetClaimId={contentTargetId} />
+            <Content key={`${contentAccountId}:${contentTargetId || "content-default"}`} data={scopedData} action={action} busy={busy} reload={loadData} notify={setMessage} targetClaimId={contentTargetId} initialAccountId={contentAccountId} />
           </div>
-          {view === "review" && <Review data={data} action={action} busy={busy} />}
-          {view === "publish" && <Publish data={data} reload={loadData} notify={setMessage} />}
-          {view === "accounts" && <Accounts data={data} action={action} busy={busy} reload={loadData} notify={setMessage} />}
+          {view === "review" && <Review data={scopedData} action={action} busy={busy} />}
+          {view === "publish" && (scopePlatform === "wechat" ? <PlatformPublishPlanning platform="wechat" /> : <Publish data={scopePlatform ? scopedData : { ...data, claims: data.claims.filter((claim) => (claim.account_platform || "xiaohongshu") === "xiaohongshu") }} reload={loadData} notify={setMessage} />)}
+          {view === "accounts" && <Accounts platform={scopePlatform || "xiaohongshu"} data={scopePlatform ? { ...data, accounts: data.accounts.filter((account) => (account.platform || "xiaohongshu") === scopePlatform) } : data} action={action} busy={busy} reload={loadData} notify={setMessage} />}
           {view === "logs" && <Logs data={data} />}
           {view === "settings" && <Settings data={data} action={action} busy={busy} />}
         </div>
       </section>
     </main>
   );
+}
+
+function AccountWorkspace({ accountId, data, setView, openContent }: { accountId: string; data: AppData; setView: (view: string) => void; openContent: (accountId: string, claimId?: string) => void }) {
+  const account = data.accounts.find((item) => item.id === accountId);
+  if (!account) return <section className="panel"><Empty title="没有找到这个账号" text="请从左侧平台选择中重新选择账号。" /></section>;
+  const platform = account.platform || "xiaohongshu";
+  const xhs = platform === "xiaohongshu";
+  const name = platformLabel(platform);
+  const claims = data.claims.filter((claim) => claim.account_id === account.id);
+  const writingCount = claims.filter((claim) => ["writing", "revision"].includes(claim.status)).length;
+  const reviewCount = claims.filter((claim) => claim.status === "review").length;
+  const publishedCount = claims.filter((claim) => claim.status === "published").length;
+  const accountIdentifier = xhs ? (account.xhs_red_id || account.xhs_user_id || account.external_user_id) : account.external_user_id;
+  const identifierLabel = xhs ? "小红书号" : platform === "zhihu" ? "知乎账号标识" : "公众号标识";
+  return <div className={`account-workspace channel-${platform} page-stack`}>
+    <header className="account-workspace-head"><span className="large-avatar" style={{ background: account.color }}>{name.slice(0, 1)}</span><div><span className="section-kicker">{name}账号</span><h1>{account.external_display_name || account.xhs_nickname || account.name}</h1><p>{account.persona || `这个账号尚未设置内容定位。`}</p></div><div className="account-head-actions"><span className={`account-state ${["online", "auth_configured"].includes(account.status) ? "" : "error"}`}><i></i>{accountStatus[account.status] || account.status}</span><button className="outline compact" onClick={() => setView("accounts")}>管理账号资料</button></div></header>
+    <section className="account-overview-grid" aria-label="账号资料与内容概览">
+      <article className="panel account-profile-card"><div className="panel-head"><div><h2>账号资料</h2><p>当前账号身份与运营定位</p></div></div><dl className="account-profile-list"><div><dt>所属平台</dt><dd>{name}</dd></div><div><dt>{identifierLabel}</dt><dd>{accountIdentifier || "暂未同步"}</dd></div><div><dt>账号简介</dt><dd>{account.profile_bio || "暂未填写"}</dd></div><div><dt>目标受众</dt><dd>{account.audience || "暂未设置"}</dd></div><div><dt>内容方向</dt><dd>{account.content_pillars?.length ? account.content_pillars.join("、") : "暂未设置"}</dd></div></dl></article>
+      <article className="panel account-stat-card"><div className="panel-head"><div><h2>内容概览</h2><p>仅统计当前账号</p></div></div><dl className="account-stat-grid"><div><dt>全部内容</dt><dd>{claims.length}</dd></div><div><dt>制作中</dt><dd>{writingCount}</dd></div><div><dt>待审核</dt><dd>{reviewCount}</dd></div><div><dt>已发布</dt><dd>{publishedCount}</dd></div></dl><div className="account-public-stats"><span>粉丝 <strong>{account.followers_count || "—"}</strong></span><span>互动 <strong>{account.interaction_count || "—"}</strong></span><span>内容 <strong>{account.note_count ?? "—"}</strong></span></div></article>
+    </section>
+    <section className="panel account-content-section"><div className="panel-head"><div><h2>创作内容</h2><p>点击内容进入对应平台的制作页面</p></div><button onClick={() => openContent(account.id)}>查看全部内容</button></div>{claims.length ? <div className="account-content-list">{claims.map((claim) => <button key={claim.id} onClick={() => openContent(account.id, claim.id)}><FileText aria-hidden="true" size={17} /><span><strong>{claim.title || claim.topic_title}</strong><small>{claim.owner_name} · {dateTime(claim.updated_at)}</small></span><span className={`status ${toneFor(claim.status)}`}>{claim.status_label}</span><ArrowRight aria-hidden="true" size={15} /></button>)}</div> : <Empty title="这个账号还没有内容" text="从左侧选题中心认领任务后，创作内容会显示在这里。" />}</section>
+  </div>;
+}
+
+function PlatformPublishPlanning({ platform }: { platform: "wechat" }) {
+  const name = platformLabel(platform); const glyph = "微";
+  return <div className={`zhihu-publish-planning page-stack channel-${platform}`}>
+    <section className="planning-hero"><span className="platform-glyph" aria-hidden="true">{glyph}</span><div><span className="section-kicker">{name}发布 · 设计中</span><h1>审核可以继续，正式发布暂不开放</h1><p>{name}和小红书的编辑器、授权方式、成功判定与内容回执不同，因此不会复用小红书 MCP 发布按钮。</p></div><span className="planning-state">尚未开放</span></section>
+    <section className="publish-adapter-grid"><article><strong>当前可用</strong><h2>专栏内容制作与团队审核</h2><p>知乎长文可以生成、修改、提交审核并冻结文本快照。</p></article><article><strong>正在设计</strong><h2>知乎独立发布适配器</h2><p>将单独处理知乎授权、专栏编辑器、发布回执和失败恢复。</p></article><article><strong>开放条件</strong><h2>真实账号完整验收</h2><p>只有成功确认、超时核验与重复发布保护全部通过后，页面才会开放发布按钮。</p></article></section>
+    <section className="panel adapter-boundary"><div><span className="section-kicker">发布边界</span><h2>两个平台不会共用发布口子</h2></div><div><span><i className="xhs-dot"></i>小红书<strong>MCP 浏览器发布 · 当前可用</strong></span><span><i className="zhihu-dot"></i>知乎<strong>独立适配器 · 设计与验证中</strong></span></div></section>
+  </div>;
 }
 
 function AuthPage({ mode, onSubmit, busy, message }: { mode: "setup" | "login"; onSubmit: (event: FormEvent<HTMLFormElement>, mode: "setup" | "login") => void; busy: boolean; message: string }) {
@@ -215,6 +313,84 @@ function Dashboard({ data, setView, openClaim }: { data: AppData; setView: (view
       <article className="alert-card"><div className="alert-head"><span>账号提醒</span><b><Bell aria-hidden="true" size={17} /></b></div><h3>{data.accounts.length ? data.accounts.find((a) => a.status === "login_expired")?.name || "账号运行正常" : "尚未添加账号"}</h3><p>{!data.accounts.length ? "账号中心只展示你实际添加的平台账号。" : data.accounts.some((a) => a.status === "login_expired") ? "登录状态已失效，相关发布任务将保持暂停。" : "所有账号连接状态正常。"}</p><button onClick={() => setView("accounts")}>{data.accounts.length ? "立即处理" : "添加账号"} →</button></article>
       <section className="panel account-panel"><div className="panel-head"><div><h2>平台运行状态</h2><p>{data.accounts.length} 个账号 · 全局并发上限 2</p></div><button onClick={() => setView("accounts")}>管理</button></div><div className="account-list">{data.accounts.length ? data.accounts.slice(0, 4).map((account) => <AccountRow key={account.id} account={account} />) : <div className="account-mini-empty">暂无已接入账号</div>}</div><button className="account-view-all" onClick={() => setView("accounts")}>查看全部</button></section>
     </aside>
+  </div>;
+}
+
+function ArticleResearch({ reloadApp, notify }: { reloadApp: () => Promise<void>; notify: (message: string) => void }) {
+  const articleSites = [
+    ["36kr.com", "36氪"], ["huxiu.com", "虎嗅"], ["csdn.net", "CSDN"], ["juejin.cn", "掘金"],
+    ["cnblogs.com", "博客园"], ["sspai.com", "少数派"], ["ithome.com", "IT之家"], ["thepaper.cn", "澎湃新闻"],
+  ] as const;
+  const [data, setData] = useState<ArticleResearchData | null>(null);
+  const [keywords, setKeywords] = useState("");
+  const [includeDomains, setIncludeDomains] = useState<string[]>([]);
+  const [timeRange, setTimeRange] = useState("month");
+  const [searching, setSearching] = useState(false);
+  const [workingId, setWorkingId] = useState("");
+  const [editing, setEditing] = useState<ArticleSample | null>(null);
+  const [topicTitle, setTopicTitle] = useState("");
+
+  function toggleDomain(domain: string, selected: string[], update: (value: string[]) => void) {
+    update(selected.includes(domain) ? selected.filter((item) => item !== domain) : [...selected, domain]);
+  }
+
+  const load = useCallback(async () => setData(await jsonRequest<ArticleResearchData>("/api/article-research")), []);
+  useEffect(() => {
+    jsonRequest<ArticleResearchData>("/api/article-research").then((result) => setData(result))
+      .catch((error) => notify(error instanceof Error ? error.message : "无法读取文章研究库"));
+  }, [notify]);
+
+  async function runSearch() {
+    setSearching(true);
+    notify("正在搜索文章并抓取正文；文章数量较多时可能需要几分钟");
+    try {
+      const result = await jsonRequest<{ discovered: number; fetched: number; errors?: string[] }>("/api/article-research", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "search", keywords, include_domains: includeDomains, time_range: timeRange }) });
+      await load();
+      notify(`已发现 ${result.discovered} 条搜索结果，新增抓取 ${result.fetched} 篇正文${result.errors?.length ? `；${result.errors.length} 个关键词搜索异常` : ""}`);
+    } catch (error) { notify(error instanceof Error ? error.message : "文章搜索失败"); }
+    finally { setSearching(false); }
+  }
+
+  async function sampleAction(action: "create_topic" | "archive", sample: ArticleSample, title = "") {
+    setWorkingId(sample.id);
+    try {
+      await jsonRequest("/api/article-research", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, sample_id: sample.id, title }) });
+      await Promise.all([load(), reloadApp()]);
+      notify(action === "create_topic" ? "文章已转入知乎选题中心，可继续认领、创作、审核和发布" : "文章样本已归档");
+      setEditing(null); setTopicTitle("");
+    } catch (error) { notify(error instanceof Error ? error.message : "操作失败"); }
+    finally { setWorkingId(""); }
+  }
+
+  if (!data) return <div className="loading-page"><span></span><p>正在读取知乎SEO文章库…</p></div>;
+  const visible = data.samples.filter((sample) => sample.status !== "used");
+  return <div className="page-stack article-research-page channel-zhihu">
+    <section className="article-research-hero">
+      <div><span className="pill">知乎 SEO 选题研究</span><h1>输入筛选关键词，搜索并读取外部文章</h1><p>搜索排名负责发现需求，正文抓取负责提供事实素材；转入选题后继续复用现有认领、AI创作、审核与发布流程。</p></div>
+      <div className={`research-connection ${data.configured ? "ready" : "warning"}`}><i aria-hidden="true"></i><div><strong>{data.configured ? "文章搜索服务已连接" : "文章搜索服务未连接"}</strong><span>{data.configured ? "可搜索全网文章并抓取正文" : "请检查本机搜索服务"}</span></div></div>
+    </section>
+    <section className="panel article-search-form">
+      <div className="panel-head"><div><h2>文章筛选条件</h2><p>关键词由用户主动输入；逗号或换行分隔，系统不擅自扩词。</p></div></div>
+      <div className="article-filter-grid">
+        <label className="wide">筛选关键词<textarea value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="例如：AI副业，普通人做自媒体，职场转型" /></label>
+        <label>发布时间<select value={timeRange} onChange={(event) => setTimeRange(event.target.value)}><option value="day">最近一天</option><option value="week">最近一周</option><option value="month">最近一个月</option><option value="year">最近一年</option><option value="">不限</option></select></label>
+        <div className="domain-filter"><span>文章来源网站</span><details><summary><span>{includeDomains.length ? `已选 ${includeDomains.length} 个网站` : "全网文章"}</span><CaretDown aria-hidden="true" size={14} /></summary><div className="domain-check-panel"><label className="domain-all"><input type="checkbox" checked={!includeDomains.length} onChange={() => setIncludeDomains([])} />不限网站（全网搜索）</label>{articleSites.map(([domain, name]) => <label key={domain} aria-label={`搜索${name}`}><input type="checkbox" checked={includeDomains.includes(domain)} onChange={() => toggleDomain(domain, includeDomains, setIncludeDomains)} /><span><strong>{name}</strong><small>{domain}</small></span></label>)}</div></details></div>
+      </div>
+      <div className="article-search-actions"><button className="primary" disabled={searching || !keywords.trim()} onClick={runSearch}>{searching ? "正在搜索并抓取正文…" : "开始搜索文章"}</button><small>全网搜索时每个关键词读取前12条；勾选网站后，每个关键词会分别定向搜索各网站。URL自动去重。</small></div>
+    </section>
+    <section className="panel article-results">
+      <div className="panel-head"><div><h2>外部文章研究库</h2><p>{visible.length} 篇待筛选 · 搜索排名、跨关键词命中和正文完整度共同判断</p></div><span className="count-chip">已转选题 {data.samples.filter((sample) => sample.status === "used").length}</span></div>
+      {visible.length ? <div className="article-result-list">{visible.map((sample) => <article key={sample.id}>
+        <div className="article-score"><strong>{sample.trend_score}</strong><span>趋势分</span></div>
+        <div className="article-result-main"><div className="article-result-title"><div><span>{sample.matched_keywords.map((word) => `#${word}`).join(" · ")}</span><h3>{sample.title}</h3></div><em className={sample.processing_status === "success" ? "success" : "failed"}>{sample.processing_status === "success" ? "正文已读取" : "正文失败"}</em></div>
+          <div className="article-result-meta"><span>来源 <strong>{sample.source_domain}</strong></span><span>最佳排名 <strong>{sample.best_rank}</strong></span><span>关键词命中 <strong>{sample.occurrence_count}</strong></span><span>相关度 <strong>{sample.relevance_score}</strong></span>{sample.published_at ? <span>发布时间 <strong>{dateOnly(sample.published_at)}</strong></span> : null}<a href={sample.source_url} target="_blank" rel="noreferrer">查看原文 ↗</a></div>
+          <p>{sample.snippet || sample.detail_text.slice(0, 260) || sample.detail_error}</p>
+          {sample.detail_text ? <details><summary>查看已抓取正文</summary><div>{sample.detail_text}</div></details> : <div className="article-fetch-error">{sample.detail_error || "没有可用正文"}</div>}
+        </div>
+        <aside><button className="outline" disabled={sample.processing_status !== "success" || workingId === sample.id} onClick={() => { setEditing(sample); setTopicTitle(sample.title); }}>转入选题中心</button><button className="ghost" disabled={workingId === sample.id} onClick={() => sampleAction("archive", sample)}>忽略</button></aside>
+      </article>)}</div> : <Empty title="还没有外部文章样本" text="在上方输入一个或多个筛选关键词，系统会搜索文章网站并抓取正文。" />}
+    </section>
+    {editing ? <div className="modal-backdrop"><form className="modal" onSubmit={(event) => { event.preventDefault(); sampleAction("create_topic", editing, topicTitle); }}><span className="section-kicker">转入知乎选题</span><h2>确认用于知乎SEO的选题标题</h2><div className="source-sample"><small>外部来源</small><strong>{editing.title}</strong><span>{editing.source_domain} · 搜索最佳排名 {editing.best_rank}</span></div><label>知乎选题标题<input required value={topicTitle} onChange={(event) => setTopicTitle(event.target.value)} /></label><p className="modal-help">来源正文会作为不可信参考材料进入AI创作，系统要求重新组织表达，不复制原文。</p><div className="modal-actions"><button type="button" className="ghost" onClick={() => setEditing(null)}>取消</button><button className="primary" disabled={workingId === editing.id}>转入正式选题库</button></div></form></div> : null}
   </div>;
 }
 
@@ -446,7 +622,7 @@ function Trends({ reloadApp, notify }: { reloadApp: () => Promise<void>; notify:
   </div>;
 }
 
-function Topics({ data, action, busy }: { data: AppData; action: (payload: Record<string, unknown>, success: string) => void; busy: boolean }) {
+function Topics({ platform, data, action, busy }: { platform: PlatformId; data: AppData; action: (payload: Record<string, unknown>, success: string) => void; busy: boolean }) {
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [claiming, setClaiming] = useState<Topic | null>(null);
@@ -467,6 +643,14 @@ function Topics({ data, action, busy }: { data: AppData; action: (payload: Recor
   const activeGroup = topicGroups.find((group) => group.id === topicFilter) || topicGroups[0];
   const visibleTopics = data.topics.filter(activeGroup.matches);
   const allVisibleTopicsSelected = Boolean(visibleTopics.length) && visibleTopics.every((topic) => selectedTopics.includes(topic.id));
+  const isZhihu = platform === "zhihu";
+  const topicCopy = platform === "zhihu" ? {
+    glyph: "知", kicker: "知乎选题中心 · 专栏 V1", headline: "沉淀适合知乎长文表达的专栏选题", intro: "当前先支持人工建立专栏选题，后续知乎问题池会使用独立数据来源接入。", state: "人工选题阶段", newKicker: "新建知乎专栏选题", newTitle: "记录一个值得完整回答的主题", titlePlaceholder: "输入专栏文章主题", urlPlaceholder: "知乎问题或参考资料链接（选填）", addLabel: "添加知乎选题", libraryTitle: "知乎专栏选题库", libraryDesc: "管理专栏主题、认领人和内容生产状态，不混入小红书样本数据", itemLabel: "知乎专栏选题", sourceLabel: "参考资料", sourceName: "知乎数据源", summaryFallback: "人工添加的知乎专栏主题，等待认领后形成长文结构。", directionFallback: "认领时补充文章切入角度", footer: "知乎问题池将在后续版本接入", emptyName: "知乎", emptyText: "先在上方添加知乎专栏主题；知乎问题池会在独立数据源接入后开放。",
+  } : platform === "wechat" ? {
+    glyph: "微", kicker: "公众号选题中心 · 图文文章", headline: "沉淀适合微信公众号持续运营的文章选题", intro: "当前支持人工建立公众号选题，并与小红书、知乎的数据和账号完全分开。", state: "平台框架已接入", newKicker: "新建公众号文章选题", newTitle: "记录一个适合公众号展开的主题", titlePlaceholder: "输入公众号文章主题", urlPlaceholder: "参考文章或资料链接（选填）", addLabel: "添加公众号选题", libraryTitle: "公众号文章选题库", libraryDesc: "管理公众号主题、认领人和内容生产状态，不混入其他平台数据", itemLabel: "公众号文章选题", sourceLabel: "参考资料", sourceName: "公众号数据源", summaryFallback: "人工添加的公众号文章主题，等待认领后形成文章结构。", directionFallback: "认领时补充文章切入角度", footer: "公众号数据源将在后续版本接入", emptyName: "公众号", emptyText: "先在上方添加公众号文章主题；自动选题数据源后续独立接入。",
+  } : {
+    glyph: "小", kicker: "小红书选题中心 · 图文笔记", headline: "从真实爆款样本沉淀小红书图文选题", intro: "选题来自小红书爆款搜索、正文拆解或人工补充，并保留真实笔记依据。", state: "爆款搜索已接入", newKicker: "补充小红书选题", newTitle: "把一个想法加入小红书选题池", titlePlaceholder: "输入小红书图文选题", urlPlaceholder: "小红书笔记或参考链接（选填）", addLabel: "添加小红书选题", libraryTitle: "小红书图文选题库", libraryDesc: "保留真实笔记来源、互动数据、爆点拆解和认领记录", itemLabel: "小红书图文选题", sourceLabel: "笔记链接", sourceName: "爆款搜索", summaryFallback: "人工添加的小红书选题，暂无自动摘要。", directionFallback: "暂无自动拆解", footer: "", emptyName: "小红书", emptyText: "先去爆款搜索页采集和拆解样本，再人工选择或批量转入选题中心。",
+  };
 
   function toggleTopic(topicId: string) {
     setSelectedTopics((current) => current.includes(topicId) ? current.filter((id) => id !== topicId) : [...current, topicId]);
@@ -479,31 +663,32 @@ function Topics({ data, action, busy }: { data: AppData; action: (payload: Recor
     setSelectedTopics([]);
   }
 
-  return <div className="page-stack">
-    {canOperate ? <section className="panel creation-strip"><div><span className="section-kicker">快速创建</span><h2>把一个想法加入团队选题池</h2></div><form onSubmit={(e) => { e.preventDefault(); action({ action: "create_topic", title, source_url: url, relevance: "中" }, "选题已创建"); setTitle(""); setUrl(""); }}><input value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="输入选题标题" /><input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="来源链接（选填）" /><button className="primary" disabled={busy}>添加选题</button></form></section> : null}
+  return <div className={`page-stack platform-topic-page channel-${platform}`}>
+    <header className="platform-topic-head"><span className="platform-glyph" aria-hidden="true">{topicCopy.glyph}</span><div><span className="section-kicker">{topicCopy.kicker}</span><h1>{topicCopy.headline}</h1><p>{topicCopy.intro}</p></div><span className="platform-topic-state">{topicCopy.state}</span></header>
+    {canOperate ? <section className="panel creation-strip"><div><span className="section-kicker">{topicCopy.newKicker}</span><h2>{topicCopy.newTitle}</h2></div><form onSubmit={(e) => { e.preventDefault(); action({ action: "create_topic", title, source_url: url, relevance: "中", platform, source_type: "manual" }, `${platformLabel(platform)}选题已创建`); setTitle(""); setUrl(""); }}><input value={title} onChange={(e) => setTitle(e.target.value)} required placeholder={topicCopy.titlePlaceholder} /><input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={topicCopy.urlPlaceholder} /><button className="primary" disabled={busy}>{topicCopy.addLabel}</button></form></section> : null}
     <section className="panel data-panel">
-      <div className="panel-head"><div><h2>团队选题库</h2><p>每个选题都保留真实来源、互动数据、拆解和认领记录</p></div><span className="count-chip">{visibleTopics.length} / {data.topics.length} 个选题</span></div>
+      <div className="panel-head"><div><h2>{topicCopy.libraryTitle}</h2><p>{topicCopy.libraryDesc}</p></div><span className="count-chip">{visibleTopics.length} / {data.topics.length} 个选题</span></div>
       <div className="topic-status-tabs" aria-label="按选题状态筛选">{topicGroups.map((group) => { const count = data.topics.filter(group.matches).length; return <button key={group.id} className={topicFilter === group.id ? "active" : ""} onClick={() => setTopicFilter(group.id)}>{group.label}<span>{count}</span></button>; })}</div>
       {canOperate && visibleTopics.length ? <div className="topic-batch-bar"><label><input type="checkbox" checked={allVisibleTopicsSelected} onChange={() => setSelectedTopics(allVisibleTopicsSelected ? selectedTopics.filter((id) => !visibleTopics.some((topic) => topic.id === id)) : Array.from(new Set([...selectedTopics, ...visibleTopics.map((topic) => topic.id)])))} />全选当前分类</label><span>已选择 {selectedTopics.length} 个选题</span><button className="ghost" disabled={!selectedTopics.length || busy} onClick={() => setSelectedTopics([])}>清空</button><button type="button" className="danger-outline" disabled={!selectedTopics.length || busy} onClick={() => setConfirmingTopicDelete(true)}>{busy ? "正在处理…" : `批量删除${selectedTopics.length ? `（${selectedTopics.length}）` : ""}`}</button></div> : null}
       {visibleTopics.length ? <div className="data-list topic-cards">{visibleTopics.map((topic) => <article className={`topic-row ${topic.brief ? "analyzed" : ""} ${selectedTopics.includes(topic.id) ? "selected" : ""}`} key={topic.id}>
         <label className="topic-selector" aria-label={`选择 ${topic.title}`}><input type="checkbox" checked={selectedTopics.includes(topic.id)} onChange={() => toggleTopic(topic.id)} /></label>
         <div className="topic-index">{topic.heat_score || topic.score || topic.title.slice(0, 1)}</div>
-        <div className="topic-info"><div className="topic-title-line"><div><span>选题标题</span><h3>{topic.title}</h3></div><span className={`soft-badge ${topic.status}`}>{topic.note_id && !topic.source_detail_verified ? "来源正文未验证" : topic.claim_status ? claimStatus[topic.claim_status] || topic.claim_status : "待认领"}</span></div><div className="topic-source-grid"><div><span>链接</span>{topic.source_url ? <a href={topic.source_url} target="_blank" rel="noreferrer">打开原笔记 ↗</a> : <strong>暂无</strong>}</div><div><span>作者</span><strong>{topic.source_author || "暂无"}</strong></div><div><span>关键词</span><strong>{topic.source_keyword ? `#${topic.source_keyword}` : "暂无"}</strong></div><div><span>点赞</span><strong>{topic.liked_count || "暂无"}</strong></div><div><span>收藏</span><strong>{topic.collected_count || "暂无"}</strong></div><div><span>评论</span><strong>{topic.comment_count || "暂无"}</strong></div><div><span>热度分</span><strong>{topic.heat_score ?? "暂无"}</strong></div><div><span>状态</span><strong>{topic.note_id && !topic.source_detail_verified ? "不可认领" : topic.claim_status ? claimStatus[topic.claim_status] || topic.claim_status : "待认领"}</strong></div><div><span>认领人</span><strong>{topic.claim_owner_name || "未认领"}</strong></div><div><span>抓取日期</span><strong>{topic.captured_at ? dateTime(topic.captured_at) : "暂无"}</strong></div><div><span>笔记日期</span><strong>{topic.note_published_at ? dateOnly(topic.note_published_at) : "暂无"}</strong></div><div><span>笔记ID</span><strong className="note-id">{topic.note_id || "暂无"}</strong></div></div><div className="topic-breakdown"><div className="topic-summary"><span>内容摘要</span><p>{topic.note_id && !topic.source_detail_verified ? "该选题由旧逻辑在正文获取失败时生成，拆解内容仅供排查，不应作为创作依据。" : topic.brief || "人工添加的选题，暂无自动摘要。"}</p></div><div className="topic-hooks"><span>爆点拆解</span><p>{topic.note_id && !topic.source_detail_verified ? "等待来源正文验证" : topic.hook_points?.length ? topic.hook_points.join(" · ") : "暂无自动拆解"}</p></div>{topic.brief && (!topic.note_id || Boolean(topic.source_detail_verified)) ? <dl><div><dt>目标用户</dt><dd>{topic.target_audience}</dd></div><div><dt>核心痛点</dt><dd>{topic.pain_point}</dd></div><div><dt>内容结构</dt><dd>{topic.content_structure?.join(" → ")}</dd></div><div><dt>账号匹配</dt><dd>{topic.account_fit}</dd></div></dl> : null}<small>创建人 {topic.creator_name} · 参考 {topic.source_feed_ids?.length || (topic.note_id ? 1 : 0)} 条真实样本</small></div></div>
-        {canOperate ? <button className="outline topic-claim-button" disabled={!data.accounts.length || Boolean(topic.note_id && !topic.source_detail_verified)} onClick={() => setClaiming(topic)}>{topic.note_id && !topic.source_detail_verified ? "等待正文验证" : topic.claim_status ? "再次认领" : "认领创作"}</button> : null}
-      </article>)}</div> : <Empty title={`${activeGroup.label}分类暂无选题`} text={data.topics.length ? "可以切换上方状态查看其他选题。" : "先去爆款搜索页采集和拆解样本，再人工选择或批量转入选题中心。"} />}
+        <div className="topic-info"><div className="topic-title-line"><div><span>{topicCopy.itemLabel}</span><h3>{topic.title}</h3></div><span className={`soft-badge ${topic.status}`}>{topic.note_id && !topic.source_detail_verified ? "来源正文未验证" : topic.claim_status ? claimStatus[topic.claim_status] || topic.claim_status : "待认领"}</span></div><div className="topic-source-grid"><div><span>{topicCopy.sourceLabel}</span>{topic.source_url ? <a href={topic.source_url} target="_blank" rel="noreferrer">打开来源 ↗</a> : <strong>人工选题</strong>}</div><div><span>来源方式</span><strong>{topic.source_type === "manual" ? "手动创建" : topic.source_keyword || topicCopy.sourceName}</strong></div><div><span>状态</span><strong>{topic.note_id && !topic.source_detail_verified ? "不可认领" : topic.claim_status ? claimStatus[topic.claim_status] || topic.claim_status : "待认领"}</strong></div><div><span>认领人</span><strong>{topic.claim_owner_name || "未认领"}</strong></div></div><div className="topic-breakdown"><div className="topic-summary"><span>{isZhihu ? "主题说明" : "内容摘要"}</span><p>{topic.note_id && !topic.source_detail_verified ? "该选题由旧逻辑在正文获取失败时生成，拆解内容仅供排查，不应作为创作依据。" : topic.brief || topicCopy.summaryFallback}</p></div><div className="topic-hooks"><span>{isZhihu ? "论述方向" : "创作方向"}</span><p>{topic.note_id && !topic.source_detail_verified ? "等待来源正文验证" : topic.hook_points?.length ? topic.hook_points.join(" · ") : topicCopy.directionFallback}</p></div>{topic.brief && (!topic.note_id || Boolean(topic.source_detail_verified)) ? <dl><div><dt>目标用户</dt><dd>{topic.target_audience}</dd></div><div><dt>核心痛点</dt><dd>{topic.pain_point}</dd></div><div><dt>内容结构</dt><dd>{topic.content_structure?.join(" → ")}</dd></div><div><dt>账号匹配</dt><dd>{topic.account_fit}</dd></div></dl> : null}<small>创建人 {topic.creator_name} · {topicCopy.footer || `参考 ${topic.source_feed_ids?.length || (topic.note_id ? 1 : 0)} 条真实样本`}</small></div></div>
+        {canOperate ? <button className="outline topic-claim-button" disabled={!data.accounts.some((account) => (account.platform || "xiaohongshu") === (topic.platform || "xiaohongshu")) || Boolean(topic.note_id && !topic.source_detail_verified)} onClick={() => { setAccountId(data.accounts.find((account) => (account.platform || "xiaohongshu") === (topic.platform || "xiaohongshu"))?.id || ""); setClaiming(topic); }}>{topic.note_id && !topic.source_detail_verified ? "等待正文验证" : topic.claim_status ? "再次认领" : "认领创作"}</button> : null}
+      </article>)}</div> : <Empty title={`${activeGroup.label}分类暂无${topicCopy.emptyName}选题`} text={data.topics.length ? "可以切换上方状态查看其他选题。" : topicCopy.emptyText} />}
     </section>
     {confirmingTopicDelete ? <div className="modal-backdrop"><section className="modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="topic-delete-title"><span className="section-kicker">批量删除</span><h2 id="topic-delete-title">删除已选择的 {selectedTopics.length} 个选题？</h2><p className="modal-help">选题会从选题中心归档；已有的认领、创作、审核和发布记录会继续保留。</p><div className="modal-actions"><button type="button" className="ghost" onClick={() => setConfirmingTopicDelete(false)}>取消</button><button type="button" className="danger-confirm" disabled={busy} onClick={archiveSelectedTopics}>{busy ? "正在删除…" : "确认删除"}</button></div></section></div> : null}
-    {claiming ? <div className="modal-backdrop"><form className="modal" onSubmit={(e) => { e.preventDefault(); action({ action: "claim_topic", topic_id: claiming.id, account_id: accountId, angle }, `已由 ${data.user.name} 认领，进入团队内容`); setClaiming(null); }}><span className="section-kicker">认领创作</span><h2>{claiming.title}</h2>{claiming.brief ? <div className="source-sample"><small>选题拆解</small><strong>{claiming.brief}</strong><span>{claiming.hook_points?.join(" · ")}</span></div> : null}<div className="claim-worker-note"><span>认领工作人员</span><strong>{data.user.name}</strong><small>@{data.user.username} · {roleLabel(data.user.roles)}</small></div><label>发布账号<select value={accountId} onChange={(e) => setAccountId(e.target.value)}>{data.accounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {accountStatus[account.status]}</option>)}</select></label><label>创作角度<textarea value={angle} onChange={(e) => setAngle(e.target.value)} placeholder={claiming.pain_point || "例如：从普通上班族的真实体验切入"} /></label><div className="modal-actions"><button type="button" className="ghost" onClick={() => setClaiming(null)}>取消</button><button className="primary" disabled={busy}>确认由我认领</button></div></form></div> : null}
+    {claiming ? <div className="modal-backdrop"><form className="modal" onSubmit={(e) => { e.preventDefault(); action({ action: "claim_topic", topic_id: claiming.id, account_id: accountId, angle }, `已由 ${data.user.name} 认领，进入团队内容`); setClaiming(null); }}><span className="section-kicker">认领创作 · {platformLabel(claiming.platform)}</span><h2>{claiming.title}</h2>{claiming.brief ? <div className="source-sample"><small>选题拆解</small><strong>{claiming.brief}</strong><span>{claiming.hook_points?.join(" · ")}</span></div> : null}<div className="claim-worker-note"><span>认领工作人员</span><strong>{data.user.name}</strong><small>@{data.user.username} · {roleLabel(data.user.roles)}</small></div><label>发布账号<select value={accountId} onChange={(e) => setAccountId(e.target.value)}>{data.accounts.filter((account) => (account.platform || "xiaohongshu") === (claiming.platform || "xiaohongshu")).map((account) => <option key={account.id} value={account.id}>{account.name} · {accountStatus[account.status]}</option>)}</select></label><label>创作角度<textarea value={angle} onChange={(e) => setAngle(e.target.value)} placeholder={claiming.pain_point || "例如：从具体问题和可验证经验切入"} /></label><div className="modal-actions"><button type="button" className="ghost" onClick={() => setClaiming(null)}>取消</button><button className="primary" disabled={busy || !data.accounts.some((account) => (account.platform || "xiaohongshu") === (claiming.platform || "xiaohongshu") && account.id === accountId)}>确认由我认领</button></div></form></div> : null}
   </div>;
 }
 
-function Content({ data, action, busy, reload, notify, targetClaimId }: { data: AppData; action: (payload: Record<string, unknown>, success: string) => void; busy: boolean; reload: () => Promise<void>; notify: (message: string) => void; targetClaimId: string }) {
+function Content({ data, action, busy, reload, notify, targetClaimId, initialAccountId }: { data: AppData; action: (payload: Record<string, unknown>, success: string) => void; busy: boolean; reload: () => Promise<void>; notify: (message: string) => void; targetClaimId: string; initialAccountId?: string }) {
   const teamClaims = data.claims;
   const initialTarget = teamClaims.find((claim) => claim.id === targetClaimId);
-  const [selectedAccountId, setSelectedAccountId] = useState(initialTarget?.account_id ?? "");
+  const [selectedAccountId, setSelectedAccountId] = useState(initialTarget?.account_id ?? initialAccountId ?? "");
   const accountClaims = selectedAccountId ? teamClaims.filter((claim) => claim.account_id === selectedAccountId) : [];
   const [selectedId, setSelectedId] = useState(initialTarget?.id ?? "");
-  const [contentLevel, setContentLevel] = useState<"accounts" | "list" | "editor">(initialTarget ? "editor" : "accounts");
+  const [contentLevel, setContentLevel] = useState<"accounts" | "list" | "editor">(initialTarget ? "editor" : initialAccountId ? "list" : "accounts");
   const selected = accountClaims.find((claim) => claim.id === selectedId);
   const [creative, setCreative] = useState<CreativeDraft>(() => blankCreative(selected));
   const [instruction, setInstruction] = useState("");
@@ -634,9 +819,11 @@ function Content({ data, action, busy, reload, notify, targetClaimId }: { data: 
   }
 
   const selectedAccount = data.accounts.find((account) => account.id === selectedAccountId);
+  const longArticle = isZhihuClaim(selected);
+  const selectedPlatformName = platformLabel(selectedAccount?.platform);
   const accountValue = (item?: string | number | null) => item === undefined || item === null || item === "" ? "暂无" : item;
-  if (!data.accounts.length) return <section className="panel"><Empty title="还没有小红书账号" text="先到账号中心添加并登录一个真实账号。" /></section>;
-  if (contentLevel === "accounts" || !selectedAccountId) return <div className="content-hierarchy-page"><section className="content-page-intro"><span className="section-kicker">我的内容</span><h2>先选择要管理的内容账号</h2><p>查看账号资料与内容进度，进入账号后再选择具体内容进行创作。</p></section><div className="content-account-overview-grid">{data.accounts.map((account) => { const claims = teamClaims.filter((claim) => claim.account_id === account.id); const creatingCount = claims.filter((claim) => ["writing", "revision"].includes(claim.status)).length; const reviewCount = claims.filter((claim) => claim.status === "review").length; const publishCount = claims.filter((claim) => ["approved", "queued", "publishing", "failed"].includes(claim.status)).length; const publishedCount = claims.filter((claim) => claim.status === "published").length; return <button type="button" className="panel content-account-overview-card" key={account.id} onClick={() => selectAccount(account.id)}><div className="account-profile-head"><span className="large-avatar" style={account.avatar_url ? { backgroundImage: `url(${account.avatar_url})` } : { background: account.color }}>{account.avatar_url ? "" : (account.xhs_nickname || account.name).slice(0, 1)}</span><div><h2>{account.xhs_nickname || account.name}</h2><p>{account.xhs_red_id ? `小红书号 ${account.xhs_red_id}` : account.xhs_user_id ? "已绑定小红书身份" : "尚未绑定小红书身份"}</p></div><span className={`account-state ${["login_expired", "unknown", "error"].includes(account.status) ? "error" : ""}`}><i></i>{accountStatus[account.status] || account.status}</span></div><p className="account-bio">{account.profile_bio || account.persona || "尚未同步账号简介和内容定位"}</p><div className="xhs-stats"><span><strong>{accountValue(account.following_count)}</strong>关注</span><span><strong>{accountValue(account.followers_count)}</strong>粉丝</span><span><strong>{accountValue(account.interaction_count)}</strong>获赞与收藏</span><span><strong>{accountValue(account.note_count)}</strong>笔记</span></div><div className="content-account-counts"><span><strong>{creatingCount}</strong>创作中</span><span><strong>{reviewCount}</strong>待审核</span><span><strong>{publishCount}</strong>待发布</span><span><strong>{publishedCount}</strong>已发布</span></div><footer><span>共 {claims.length} 条团队内容</span><strong>进入账号 →</strong></footer></button>; })}</div></div>;
+  if (!data.accounts.length) return <section className="panel"><Empty title="还没有平台账号" text="先到当前平台的账号管理中添加账号。" /></section>;
+  if (contentLevel === "accounts" || !selectedAccountId) return <div className="content-hierarchy-page"><section className="content-page-intro"><span className="section-kicker">我的内容</span><h2>先选择要管理的内容账号</h2><p>查看账号资料与内容进度，进入账号后再选择具体内容进行创作。</p></section><div className="content-account-overview-grid">{data.accounts.map((account) => { const claims = teamClaims.filter((claim) => claim.account_id === account.id); const creatingCount = claims.filter((claim) => ["writing", "revision"].includes(claim.status)).length; const reviewCount = claims.filter((claim) => claim.status === "review").length; const publishCount = claims.filter((claim) => ["approved", "queued", "publishing", "failed"].includes(claim.status)).length; const publishedCount = claims.filter((claim) => claim.status === "published").length; return <button type="button" className="panel content-account-overview-card" key={account.id} onClick={() => selectAccount(account.id)}><div className="account-profile-head"><span className="large-avatar" style={account.avatar_url ? { backgroundImage: `url(${account.avatar_url})` } : { background: account.color }}>{account.avatar_url ? "" : (account.xhs_nickname || account.name).slice(0, 1)}</span><div><h2>{account.xhs_nickname || account.name}</h2><p>{accountIdentitySummary(account)}</p></div><span className={`account-state ${["login_expired", "unknown", "error"].includes(account.status) ? "error" : ""}`}><i></i>{accountStatus[account.status] || account.status}</span></div><p className="account-bio">{account.profile_bio || account.persona || "尚未同步账号简介和内容定位"}</p><div className="xhs-stats"><span><strong>{accountValue(account.following_count)}</strong>关注</span><span><strong>{accountValue(account.followers_count)}</strong>粉丝</span><span><strong>{accountValue(account.interaction_count)}</strong>获赞与收藏</span><span><strong>{accountValue(account.note_count)}</strong>笔记</span></div><div className="content-account-counts"><span><strong>{creatingCount}</strong>创作中</span><span><strong>{reviewCount}</strong>待审核</span><span><strong>{publishCount}</strong>待发布</span><span><strong>{publishedCount}</strong>已发布</span></div><footer><span>共 {claims.length} 条团队内容</span><strong>进入账号 →</strong></footer></button>; })}</div></div>;
 
   if (contentLevel === "list" || !selected) return <div className="content-hierarchy-page"><div className="content-breadcrumb"><button type="button" onClick={() => { setContentLevel("accounts"); setSelectedAccountId(""); }}>← 返回账号</button><span>我的内容 / {selectedAccount?.xhs_nickname || selectedAccount?.name}</span></div><section className="panel content-account-summary"><div className="account-profile-head"><span className="large-avatar" style={selectedAccount?.avatar_url ? { backgroundImage: `url(${selectedAccount.avatar_url})` } : { background: selectedAccount?.color }}>{selectedAccount?.avatar_url ? "" : (selectedAccount?.xhs_nickname || selectedAccount?.name || "账").slice(0, 1)}</span><div><h2>{selectedAccount?.xhs_nickname || selectedAccount?.name}</h2><p>{selectedAccount?.profile_bio || selectedAccount?.persona || "选择下方内容进入创作页面"}</p></div><span className="count-chip">{accountClaims.length} 条内容</span></div></section>{accountClaims.length ? <div className="content-task-grid">{accountClaims.map((claim) => <button type="button" className="panel content-task-card" onClick={() => selectTask(claim)} key={claim.id}><div><span className={`status ${toneFor(claim.status)}`}>{contentStageLabel(claim)}</span><time>{dateTime(claim.updated_at)}</time></div><h3>{claim.title || claim.topic_title}</h3><p>{claim.body ? claim.body.slice(0, 90) : "尚未生成正文，进入后可使用 AI 一键创作。"}</p><footer><span>负责人 {claim.owner_name}</span><strong>{claim.version_number ? `v${claim.version_number}` : "待创作"} · 进入内容 →</strong></footer></button>)}</div> : <section className="panel content-account-empty"><Empty title={`${selectedAccount?.xhs_nickname || selectedAccount?.name || "这个账号"}还没有认领内容`} text="到选题中心认领选题并指定这个账号后，任务会出现在这里。" /></section>}</div>;
 
@@ -644,7 +831,7 @@ function Content({ data, action, busy, reload, notify, targetClaimId }: { data: 
     <section className="creative-main">
       {!editable ? <div className="content-flow-note"><strong>{contentStageLabel(selected)}</strong><span>{selected.status === "review" ? "内容正在审核中心等待处理。" : selected.status === "published" ? "内容已经发布，可到发布列表查看记录。" : "内容已经进入发布流程，请到发布列表继续处理。"}</span></div> : null}
       <section className="creative-command">
-        <div><span className="section-kicker">AI 创作</span><h2>一句话生成可编辑的小红书图文稿</h2><p>由小红书运营专家生成标题、正文、标签和整篇配图提示词；切换功能页不会中断。</p></div>
+        <div><span className="section-kicker">AI 创作 · {platformLabel(selectedAccount?.platform)}</span><h2>{longArticle ? `一句话生成可编辑的${selectedPlatformName}文章` : "一句话生成可编辑的小红书图文稿"}</h2><p>{longArticle ? `由${selectedPlatformName}文章编辑完成长文初稿，再经过 Humanizer 去除模板化表达。` : "由小红书运营专家生成标题、正文、标签和整篇配图提示词；切换功能页不会中断。"}</p></div>
         <div className="creative-command-row">
           <input value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="补充要求（选填）：更口语、面向职场新人、配图偏纪实摄影…" onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) event.preventDefault(); }} />
           <button className="primary" disabled={!editable || creating} onClick={generate}>{creating ? `AI 创作中 ${creationSeconds}秒` : creative.image_prompts.length ? "重新生成整篇" : "开始一键创作"}</button>
@@ -658,15 +845,15 @@ function Content({ data, action, busy, reload, notify, targetClaimId }: { data: 
         {selected.creation_error ? <div className="creation-error">上次创作失败：{selected.creation_error}</div> : null}
         {showVersions ? <div className="version-list">{versions.length ? versions.map((version) => <button key={version.id} disabled={saving} onClick={() => restoreVersion(version.version_number)}><span>v{version.version_number} · {version.source}</span><small>{version.title || "未命名"} · {dateTime(version.created_at)}</small></button>) : <p>还没有历史版本</p>}</div> : null}
         {creative.title_options.length ? <div className="title-options"><span>AI 备选标题</span><div>{creative.title_options.map((title) => <button key={title} className={creative.title === title ? "active" : ""} onClick={() => setCreative({ ...creative, title })}>{title}</button>)}</div></div> : null}
-        <label>笔记标题 <span>{creative.title.length}/20</span><input value={creative.title} onChange={(event) => setCreative(withCoverTitle({ ...creative, title: event.target.value }))} disabled={!editable} placeholder="一键创作后仍可修改" /></label>
+        <label>{longArticle ? "专栏标题" : "笔记标题"} <span>{creative.title.length}/{longArticle ? 100 : 20}</span><input maxLength={longArticle ? 100 : 20} value={creative.title} onChange={(event) => setCreative(longArticle ? { ...creative, title: event.target.value } : withCoverTitle({ ...creative, title: event.target.value }))} disabled={!editable} placeholder="一键创作后仍可修改" /></label>
         <label>正文 <span>{creative.body.length} 字</span><textarea className="body-editor" value={creative.body} onChange={(event) => setCreative({ ...creative, body: event.target.value })} disabled={!editable} placeholder="AI 会生成完整正文，也可以在这里手工编辑。" /></label>
         <label>标签<input value={creative.tags.join(" ")} onChange={(event) => setCreative({ ...creative, tags: event.target.value.split(/[，,\s]+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean) })} disabled={!editable} placeholder="多个标签用空格分隔" /></label>
-        <section className="review-image-uploader"><div><strong>最终审核图片</strong><span>上传1-9张最终图片，审核员会同时检查文案和图片；审核通过后不可在发布页替换。</span></div>{selected.publish_images?.length ? <div className="review-image-grid">{selected.publish_images.map((_, index) => <img key={index} src={reviewImageUrl(selected.id, index)} alt={`待审核图片 ${index + 1}`} />)}</div> : <p>尚未上传最终图片</p>}{editable ? <label className="outline upload-button">{uploadingImages ? "图片上传中…" : selected.publish_images?.length ? "重新选择全部图片" : "选择最终图片"}<input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={uploadingImages || saving || creating} onChange={(event) => { void uploadReviewImages(event.target.files); event.currentTarget.value = ""; }} /></label> : null}</section>
-        <div className="editor-actions"><button className="outline" disabled={!editable || saving || creating || !creative.title || !creative.body} onClick={save}>{saving ? "保存中…" : "保存图文稿"}</button><button className="primary" disabled={busy || saving || creating || uploadingImages || !editable || !creative.title || !creative.body || !selected.publish_images?.length} onClick={saveAndSubmit}>保存图文并提交审核</button></div>
+        {!longArticle ? <section className="review-image-uploader"><div><strong>最终审核图片</strong><span>上传1-9张最终图片，审核员会同时检查文案和图片；审核通过后不可在发布页替换。</span></div>{selected.publish_images?.length ? <div className="review-image-grid">{selected.publish_images.map((_, index) => <img key={index} src={reviewImageUrl(selected.id, index)} alt={`待审核图片 ${index + 1}`} />)}</div> : <p>尚未上传最终图片</p>}{editable ? <label className="outline upload-button">{uploadingImages ? "图片上传中…" : selected.publish_images?.length ? "重新选择全部图片" : "选择最终图片"}<input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={uploadingImages || saving || creating} onChange={(event) => { void uploadReviewImages(event.target.files); event.currentTarget.value = ""; }} /></label> : null}</section> : <div className="content-flow-note"><strong>{selectedPlatformName}当前为文本审核</strong><span>正文与标题会进入审核快照；平台图片规范与正式发布能力将在独立适配器验收后接入。</span></div>}
+        <div className="editor-actions"><button className="outline" disabled={!editable || saving || creating || !creative.title || !creative.body} onClick={save}>{saving ? "保存中…" : longArticle ? "保存专栏草稿" : "保存图文稿"}</button><button className="primary" disabled={busy || saving || creating || uploadingImages || !editable || !creative.title || !creative.body || (!longArticle && !selected.publish_images?.length)} onClick={saveAndSubmit}>{longArticle ? "保存专栏并提交审核" : "保存图文并提交审核"}</button></div>
       </section>
     </section>
 
-    <aside className="panel visual-builder post-image-prompts">
+    {!longArticle ? <aside className="panel visual-builder post-image-prompts">
       <div className="visual-builder-head"><div><span className="section-kicker">整篇视觉建议</span><h2>整个帖子的图片提示词</h2></div>{creative.image_prompts.length ? <button className="outline" onClick={copyImagePrompts}>复制全部提示词</button> : null}</div>
       <p className="post-prompts-intro">AI 根据完整标题和正文推荐一组独立成品图。每条提示词都描述整张图片，不是背景图、卡片模板或留字底图。</p>
       {creative.image_prompts.length ? <div className="post-prompt-list">{creative.image_prompts.map((item, index) => <article className="post-prompt-card" key={index + "-" + item.label}>
@@ -674,7 +861,7 @@ function Content({ data, action, busy, reload, notify, targetClaimId }: { data: 
         <label>图片用途<input value={item.label} disabled={!editable} maxLength={20} onChange={(event) => updateImagePrompt(index, { label: event.target.value })} /></label>
         <label>完整图片提示词<textarea value={item.prompt} disabled={!editable} maxLength={1200} onChange={(event) => updateImagePrompt(index, { prompt: event.target.value })} /></label>{index === 0 ? <small className="cover-title-rule">封面主视觉必须包含上方最终标题的逐字文字，并保证手机缩略图可读。</small> : null}
       </article>)}</div> : <div className="visual-empty"><span>✦</span><h3>还没有图片提示词</h3><p>点击“开始一键创作”，AI 会根据整篇内容推荐封面主视觉、核心观点图和场景配图。</p></div>}
-    </aside>
+    </aside> : null}
   </div></div>;
 }
 
@@ -700,9 +887,9 @@ function Review({ data, action, busy }: { data: AppData; action: (payload: Recor
     {items.length ? <div className="review-list">{items.map((claim) => <article className="review-card" key={claim.id}>
       <div className="review-card-head"><span className="account-avatar" style={{ background: claim.account_color }}>{claim.account_name.slice(0, 1)}</span><div><h3>{claim.title || claim.topic_title}</h3><p>{claim.account_name} · {claim.owner_name} · {dateTime(claim.updated_at)}</p></div><span className={`status ${toneFor(claim.status)}`}>{claim.status_label}</span></div>
       <p className="review-body">{claim.body || "尚未填写正文"}</p>
-      {claim.publish_images?.length ? <div className="review-image-grid review-center-images">{claim.publish_images.map((_, index) => <a key={index} href={reviewImageUrl(claim.id, index)} target="_blank" rel="noreferrer"><img src={reviewImageUrl(claim.id, index)} alt={`${claim.title || claim.topic_title} 审核图片 ${index + 1}`} /></a>)}</div> : <div className="review-missing-images">缺少审核图片，不能通过</div>}
+      {claim.publish_images?.length ? <div className="review-image-grid review-center-images">{claim.publish_images.map((_, index) => <a key={index} href={reviewImageUrl(claim.id, index)} target="_blank" rel="noreferrer"><img src={reviewImageUrl(claim.id, index)} alt={`${claim.title || claim.topic_title} 审核图片 ${index + 1}`} /></a>)}</div> : <div className="review-missing-images">{isZhihuClaim(claim) ? "知乎文章配图为可选项，可直接进行文本审核" : "缺少审核图片，不能通过"}</div>}
       <div className="tag-line">{claim.tags.map((tag) => <span key={tag}>#{tag.replace(/^#/, "")}</span>)}</div>
-      {claim.status === "review" && canReview ? <div className="review-actions"><input value={comments[claim.id] || ""} onChange={(e) => setComments({ ...comments, [claim.id]: e.target.value })} placeholder="退回原因（通过时可不填）" /><button className="danger-outline" disabled={busy} onClick={() => action({ action: "review", id: claim.id, result: "reject", comment: comments[claim.id] }, "已退回修改")}>退回</button><button className="primary" disabled={busy || !claim.publish_images?.length} onClick={() => action({ action: "review", id: claim.id, result: "approve", comment: comments[claim.id] }, "图文审核已通过，已进入发布列表")}>通过图文并转入发布</button></div> : <div className="queue-note">{claim.status === "review" ? "当前账号只有查看权限，等待审核员处理。" : isRejected(claim) ? `退回意见：${claim.review_comment || "未填写原因"}` : `审核已通过 · 当前进度：${claim.status_label}`}</div>}
+      {claim.status === "review" && canReview ? <div className="review-actions"><input value={comments[claim.id] || ""} onChange={(e) => setComments({ ...comments, [claim.id]: e.target.value })} placeholder="退回原因（通过时可不填）" /><button className="danger-outline" disabled={busy} onClick={() => action({ action: "review", id: claim.id, result: "reject", comment: comments[claim.id] }, "已退回修改")}>退回</button><button className="primary" disabled={busy || (!isZhihuClaim(claim) && !claim.publish_images?.length)} onClick={() => action({ action: "review", id: claim.id, result: "approve", comment: comments[claim.id] }, isZhihuClaim(claim) ? "文章审核已通过，已进入发布列表" : "图文审核已通过，已进入发布列表")}>{isZhihuClaim(claim) ? "通过文章并转入发布" : "通过图文并转入发布"}</button></div> : <div className="queue-note">{claim.status === "review" ? "当前账号只有查看权限，等待审核员处理。" : isRejected(claim) ? `退回意见：${claim.review_comment || "未填写原因"}` : `审核已通过 · 当前进度：${claim.status_label}`}</div>}
     </article>)}</div> : <Empty title={`${activeGroup.label}分类暂无内容`} text={reviewHistory.length ? "可以切换上方状态查看其他审核记录。" : "创作人员提交审核后，内容会出现在这里。"} />}
   </section>;
 }
@@ -717,11 +904,12 @@ function Publish({ data, reload, notify }: { data: AppData; reload: () => Promis
   const items = filter === "pending" ? pending : published;
 
   async function publishNow(claim: Claim) {
-    if (!window.confirm(`确认执行真实发布吗？\n\n发布账号：${claim.account_name}\n内容负责人：${claim.owner_name}\n发布操作人：${data.user.name}\n\n${claim.title || claim.topic_title}`)) return;
+    const platform = platformLabel(claim.account_platform);
+    if (!window.confirm(`确认执行真实${platform}发布吗？\n\n发布账号：${claim.account_name}\n内容负责人：${claim.owner_name}\n发布操作人：${data.user.name}\n\n${claim.title || claim.topic_title}`)) return;
     setWorking(claim.id); notify("");
     try {
       await jsonRequest("/api/publish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "publish_now", claim_id: claim.id }) });
-      await reload(); notify("内容已通过小红书 MCP 发布成功");
+      await reload(); notify(`内容已通过${platform}发布服务发布成功`);
     } catch (error) { await reload(); notify(error instanceof Error ? error.message : "发布失败"); }
     finally { setWorking(""); }
   }
@@ -741,7 +929,7 @@ function Publish({ data, reload, notify }: { data: AppData; reload: () => Promis
 
   async function resolveInterrupted(claim: Claim, outcome: "published" | "failed") {
     const label = outcome === "published" ? "已经发布成功" : "确认没有发布";
-    const reason = window.prompt(`请先到小红书创作中心核对结果。\n\n当前选择：${label}\n请输入核对说明：`);
+    const reason = window.prompt(`请先到${platformLabel(claim.account_platform)}核对结果。\n\n当前选择：${label}\n请输入核对说明：`);
     if (reason === null) return;
     if (!reason.trim()) { notify("请填写人工核对说明"); return; }
     if (!window.confirm(`确认将任务标记为“${outcome === "published" ? "已发布" : "发布失败，可重新发布"}”吗？`)) return;
@@ -756,14 +944,14 @@ function Publish({ data, reload, notify }: { data: AppData; reload: () => Promis
   const frozen = viewing?.publish_snapshot;
   return <>
     <section className="panel data-panel publish-panel">
-      <div className="panel-head publish-head"><div><h2>发布列表</h2><p>发布前同时确认小红书账号、内容负责人和实际发布工作人员</p></div><div className="publish-tabs"><button className={filter === "pending" ? "active" : ""} onClick={() => setFilter("pending")}>未发布 {pending.length}</button><button className={filter === "published" ? "active" : ""} onClick={() => setFilter("published")}>已发布 {published.length}</button></div></div>
+      <div className="panel-head publish-head"><div><h2>发布列表</h2><p>发布前确认平台账号、内容负责人和实际发布工作人员；每次发布都保留审核快照。</p></div><div className="publish-tabs"><button className={filter === "pending" ? "active" : ""} onClick={() => setFilter("pending")}>未发布 {pending.length}</button><button className={filter === "published" ? "active" : ""} onClick={() => setFilter("published")}>已发布 {published.length}</button></div></div>
       {items.length ? <div className="publish-list">{items.map((claim) => <article className="publish-card" key={claim.id}>
         <div className="publish-card-main"><span className="account-avatar" style={{ background: claim.account_color }}>{claim.account_name.slice(0, 1)}</span><div><h3>{claim.publish_snapshot?.title || claim.title || claim.topic_title}</h3><p>发布账号 {claim.account_name} · 内容负责人 {claim.owner_name}</p><div className="tag-line">{(claim.publish_snapshot?.tags || claim.tags).map((tag) => <span key={tag}>#{tag.replace(/^#/, "")}</span>)}</div></div><button className="outline view-content-button" onClick={() => setViewing(claim)}>查看内容</button></div>
-        <div className="publish-meta"><span className={`status ${toneFor(claim.status)}`}>{claim.status_label}</span><span>工作人员 {claim.publisher_name || `${data.user.name}（当前）`}</span><span>{claim.publish_images?.length || 0} 张配图</span><span>{claim.published_at ? `发布于 ${dateTime(claim.published_at)}` : `更新于 ${dateTime(claim.updated_at)}`}</span></div>
+        <div className="publish-meta"><span className={`status ${toneFor(claim.status)}`}>{claim.status_label}</span><span>{platformLabel(claim.account_platform)} · 工作人员 {claim.publisher_name || `${data.user.name}（当前）`}</span><span>{isZhihuClaim(claim) ? "专栏文本审核" : `${claim.publish_images?.length || 0} 张配图`}</span><span>{claim.published_at ? `发布于 ${dateTime(claim.published_at)}` : `更新于 ${dateTime(claim.updated_at)}`}</span>{claim.published_url ? <a href={claim.published_url} target="_blank" rel="noreferrer">查看原文 ↗</a> : null}</div>
         {claim.publish_error ? <div className="publish-error">上次发布失败：{claim.publish_error}</div> : null}
         {filter === "pending" && canPublish ? claim.status === "publishing" && claim.publish_recoverable
-          ? <div className="publish-actions"><span>发布已超过8分钟，请先到小红书核对，避免重复发布。</span><button className="outline" disabled={Boolean(working)} onClick={() => resolveInterrupted(claim, "failed")}>确认未发布，允许重试</button><button className="primary" disabled={Boolean(working)} onClick={() => resolveInterrupted(claim, "published")}>确认已经发布</button></div>
-          : <div className="publish-actions"><span>将发布审核通过的 {claim.publish_snapshot?.images?.length || claim.publish_images?.length || 0} 张图片 · 操作人 {data.user.name}</span><button className="danger-outline" disabled={Boolean(working) || claim.status === "publishing"} onClick={() => returnForRevision(claim)}>退回修改</button><button className="primary" disabled={Boolean(working) || !(claim.publish_snapshot?.images?.length || claim.publish_images?.length) || claim.status === "publishing"} onClick={() => publishNow(claim)}>{working === claim.id || claim.status === "publishing" ? "发布处理中…" : claim.status === "failed" ? "确认后重新发布" : "确认并发布审核图文"}</button></div>
+          ? <div className="publish-actions"><span>发布已超过8分钟，请先到{platformLabel(claim.account_platform)}核对，避免重复发布。</span><button className="outline" disabled={Boolean(working)} onClick={() => resolveInterrupted(claim, "failed")}>确认未发布，允许重试</button><button className="primary" disabled={Boolean(working)} onClick={() => resolveInterrupted(claim, "published")}>确认已经发布</button></div>
+          : <div className="publish-actions"><span>{isZhihuClaim(claim) ? "将通过独立浏览器发布审核冻结的知乎专栏文本" : `将发布审核通过的 ${claim.publish_snapshot?.images?.length || claim.publish_images?.length || 0} 张图片`} · 操作人 {data.user.name}</span><button className="danger-outline" disabled={Boolean(working) || claim.status === "publishing"} onClick={() => returnForRevision(claim)}>退回修改</button><button className="primary" disabled={Boolean(working) || (!isZhihuClaim(claim) && !(claim.publish_snapshot?.images?.length || claim.publish_images?.length)) || claim.status === "publishing"} onClick={() => publishNow(claim)}>{working === claim.id || claim.status === "publishing" ? "发布处理中…" : claim.status === "failed" ? "确认后重新发布" : isZhihuClaim(claim) ? "确认并发布专栏" : "确认并发布审核图文"}</button></div>
           : <div className="published-note">{filter === "pending" ? "当前账号只有查看权限，等待发布员处理。" : `由 ${claim.publisher_name || "工作人员未记录"} 发布；平台保留审核快照、账号和发布时间记录。`}</div>}
       </article>)}</div> : <Empty title={filter === "pending" ? "没有未发布内容" : "还没有已发布内容"} text={filter === "pending" ? "内容审核通过后会自动进入这里。" : "通过本页面成功发布的内容会保留在这里。"} />}
     </section>
@@ -771,11 +959,12 @@ function Publish({ data, reload, notify }: { data: AppData; reload: () => Promis
   </>;
 }
 
-function Accounts({ data, action, busy, reload, notify }: { data: AppData; action: (payload: Record<string, unknown>, success: string) => void; busy: boolean; reload: () => Promise<void>; notify: (message: string) => void }) {
+function Accounts({ platform, data, action, busy, reload, notify }: { platform: PlatformId; data: AppData; action: (payload: Record<string, unknown>, success: string) => void; busy: boolean; reload: () => Promise<void>; notify: (message: string) => void }) {
   const [adding, setAdding] = useState(false);
   const [editingStrategy, setEditingStrategy] = useState<Account | null>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [qr, setQr] = useState<{ account: Account; image: string; text: string } | null>(null);
+  const [zhihuLoginId, setZhihuLoginId] = useState("");
 
   async function xhs(account: Account, requestAction: "qrcode" | "status" | "profile") {
     setConnecting(account.id); notify("");
@@ -788,15 +977,31 @@ function Accounts({ data, action, busy, reload, notify }: { data: AppData; actio
     finally { setConnecting(null); }
   }
 
+  async function zhihuLogin(account: Account) {
+    const completing = zhihuLoginId === account.id;
+    setConnecting(account.id); notify("");
+    try {
+      const result = await jsonRequest<{ opened?: boolean; authenticated?: boolean }>("/api/zhihu", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: completing ? "browser_login_complete" : "browser_login", account_id: account.id }) });
+      if (!completing) { setZhihuLoginId(account.id); notify("知乎登录窗口已打开；完成登录后回到这里点击“我已登录，完成绑定”"); }
+      else if (result.authenticated) { setZhihuLoginId(""); notify(`${account.name} 的知乎登录已保存`); await reload(); }
+      else notify("尚未检测到知乎登录，请在浏览器窗口完成登录后重试");
+    } catch (error) { notify(error instanceof Error ? error.message : "知乎浏览器登录失败"); }
+    finally { setConnecting(null); }
+  }
+
   const isAdmin = data.user.roles.includes("admin");
-  return <div className="page-stack"><div className="accounts-toolbar"><div><span className="section-kicker">真实账号记录</span><h2>{data.accounts.length ? `${data.accounts.length} 个小红书账号` : "还没有添加小红书账号"}</h2><p>登录和身份核验使用独立可见浏览器；爆款采集使用后台 MCP 运行槽，两者不会混用账号。</p></div>{isAdmin ? <button className="primary" onClick={() => setAdding(true)}>＋ 添加小红书账号</button> : null}</div>{data.accounts.length ? <div className="account-grid">{data.accounts.map((account) => <AccountOverview key={account.id} account={account} claims={data.claims.filter((claim) => claim.account_id === account.id)} connecting={connecting === account.id} xhs={xhs} canManage={isAdmin} editStrategy={isAdmin ? () => setEditingStrategy(account) : undefined} />)}</div> : <section className="panel account-empty"><span>◎</span><h3>账号列表为空</h3><p>添加真实的小红书账号记录后，才会在工作台和选题认领中出现。</p>{isAdmin ? <button className="primary" onClick={() => setAdding(true)}>添加第一个账号</button> : null}</section>}{adding ? <div className="modal-backdrop"><form className="modal" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); action({ action: "create_account", name: form.get("name") }, "小红书账号记录已添加"); setAdding(false); }}><span className="section-kicker">账号中心</span><h2>添加小红书账号</h2><label>账号备注名称<input name="name" required placeholder="例如：品牌主账号" /></label><p className="modal-help">无需填写端口。每个账号使用独立 Cookie；登录验证串行排队，后台采集使用两个共享槽位。</p><div className="modal-actions"><button type="button" className="ghost" onClick={() => setAdding(false)}>取消</button><button className="primary" disabled={busy}>添加账号</button></div></form></div> : null}{editingStrategy ? <div className="modal-backdrop"><form className="modal strategy-modal" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); action({ action: "update_account_strategy", account_id: editingStrategy.id, persona: form.get("persona"), audience: form.get("audience"), content_pillars: form.get("content_pillars"), strategy_keywords: form.get("strategy_keywords"), excluded_topics: form.get("excluded_topics") }, `已更新“${editingStrategy.name}”的内容定位`); setEditingStrategy(null); }}><span className="section-kicker">账号内容定位</span><h2>{editingStrategy.xhs_nickname || editingStrategy.name}</h2><label>账号定位<textarea name="persona" required defaultValue={editingStrategy.persona} placeholder="例如：面向中小团队的AI内容效率顾问" /></label><label>目标受众<textarea name="audience" required defaultValue={editingStrategy.audience} placeholder="例如：内容负责人、运营主管、小团队老板" /></label><label>内容支柱（至少2个，用逗号分隔）<input name="content_pillars" required defaultValue={editingStrategy.content_pillars?.join("，")} placeholder="内容效率，团队流程，AI工具实测" /></label><label>策略关键词（至少3个，用逗号分隔）<input name="strategy_keywords" required defaultValue={editingStrategy.strategy_keywords?.join("，")} placeholder="AI内容工作流，团队提效，小红书运营" /></label><label>排除领域（选填）<input name="excluded_topics" defaultValue={editingStrategy.excluded_topics?.join("，")} placeholder="招聘，游戏，金融行情" /></label><p className="modal-help">爆款研究会用这些信息限制搜索词、判断相关度和账号适配，不再只看标题里是否出现宽泛关键词。</p><div className="modal-actions"><button className="ghost" onClick={() => setEditingStrategy(null)}>取消</button><button className="primary" disabled={busy}>保存内容定位</button></div></form></div> : null}{qr ? <div className="modal-backdrop"><section className="modal qr-modal"><span className="section-kicker">小红书扫码登录</span><h2>{qr.account.name}</h2><p>{qr.text}</p><div className="qr-image" role="img" aria-label={`${qr.account.name}的小红书登录二维码`} style={{ backgroundImage: `url(${qr.image})` }}></div><ol><li>平台会同时打开一个可见的小红书浏览器窗口</li><li>打开手机小红书 App，扫描二维码并确认登录</li><li>请在 5 分钟内点击“我已扫码”</li><li>系统核对用户ID后才会完成绑定</li></ol><div className="modal-actions"><button className="ghost" onClick={() => setQr(null)}>取消</button><button className="primary" disabled={connecting === qr.account.id} onClick={() => xhs(qr.account, "status")}>{connecting ? "核验身份中…" : "我已扫码，核验身份"}</button></div></section></div> : null}</div>;
+  const currentPlatformName = platformLabel(platform);
+  const accountHelp = platform === "xiaohongshu" ? "账号创建后通过独立浏览器扫码绑定，登录凭据只保存在团队主机。" : platform === "zhihu" ? "账号创建后点击“登录知乎”，在独立浏览器窗口完成正常登录；登录态只保存在团队主机。" : "先建立微信公众号账号记录，用于内容归属与团队协作；正式授权和发布适配器后续独立接入。";
+  return <div className="page-stack"><div className="accounts-toolbar"><div><span className="section-kicker">真实账号记录</span><h2>{data.accounts.length ? `${data.accounts.length} 个平台账号` : "还没有添加平台账号"}</h2><p>当前仅显示{currentPlatformName}账号；不同平台的登录与发布能力相互隔离。</p></div>{isAdmin ? <button className="primary" onClick={() => setAdding(true)}>＋ 添加{currentPlatformName}账号</button> : null}</div>{data.accounts.length ? <div className="account-grid">{data.accounts.map((account) => <AccountOverview key={account.id} account={account} claims={data.claims.filter((claim) => claim.account_id === account.id)} connecting={connecting === account.id} xhs={xhs} canManage={isAdmin} editStrategy={isAdmin ? () => setEditingStrategy(account) : undefined} loginZhihu={isAdmin ? () => zhihuLogin(account) : undefined} loginPending={zhihuLoginId === account.id} />)}</div> : <section className="panel account-empty"><span>◎</span><h3>账号列表为空</h3><p>添加真实的{currentPlatformName}账号后，才会在工作台和选题认领中出现。</p>{isAdmin ? <button className="primary" onClick={() => setAdding(true)}>添加第一个{currentPlatformName}账号</button> : null}</section>}{adding ? <div className="modal-backdrop"><form className="modal" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); action({ action: "create_account", platform, name: form.get("name") }, currentPlatformName + "账号记录已添加"); setAdding(false); }}><span className="section-kicker">账号中心</span><h2>添加{currentPlatformName}账号</h2><div className="fixed-platform-field"><span>所属平台</span><strong>{currentPlatformName}</strong></div><label>账号备注名称<input name="name" required placeholder="例如：品牌主账号" /></label><p className="modal-help">{accountHelp}</p><div className="modal-actions"><button type="button" className="ghost" onClick={() => setAdding(false)}>取消</button><button className="primary" disabled={busy}>添加{currentPlatformName}账号</button></div></form></div> : null}{editingStrategy ? <div className="modal-backdrop"><form className="modal strategy-modal" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); action({ action: "update_account_strategy", account_id: editingStrategy.id, persona: form.get("persona"), audience: form.get("audience"), content_pillars: form.get("content_pillars"), strategy_keywords: form.get("strategy_keywords"), excluded_topics: form.get("excluded_topics") }, `已更新“${editingStrategy.name}”的内容定位`); setEditingStrategy(null); }}><span className="section-kicker">账号内容定位</span><h2>{editingStrategy.xhs_nickname || editingStrategy.name}</h2><label>账号定位<textarea name="persona" required defaultValue={editingStrategy.persona} placeholder="例如：面向中小团队的AI内容效率顾问" /></label><label>目标受众<textarea name="audience" required defaultValue={editingStrategy.audience} placeholder="例如：内容负责人、运营主管、小团队老板" /></label><label>内容支柱（至少2个，用逗号分隔）<input name="content_pillars" required defaultValue={editingStrategy.content_pillars?.join("，")} placeholder="内容效率，团队流程，AI工具实测" /></label><label>策略关键词（至少3个，用逗号分隔）<input name="strategy_keywords" required defaultValue={editingStrategy.strategy_keywords?.join("，")} placeholder="AI内容工作流，团队提效，小红书运营" /></label><label>排除领域（选填）<input name="excluded_topics" defaultValue={editingStrategy.excluded_topics?.join("，")} placeholder="招聘，游戏，金融行情" /></label><p className="modal-help">内容定位会用于 AI 创作与后续平台选题，不会改变既有小红书爆款搜索规则。</p><div className="modal-actions"><button className="ghost" onClick={() => setEditingStrategy(null)}>取消</button><button className="primary" disabled={busy}>保存内容定位</button></div></form></div> : null}{qr ? <div className="modal-backdrop"><section className="modal qr-modal"><span className="section-kicker">小红书扫码登录</span><h2>{qr.account.name}</h2><p>{qr.text}</p><div className="qr-image" role="img" aria-label={`${qr.account.name}的小红书登录二维码`} style={{ backgroundImage: `url(${qr.image})` }}></div><ol><li>平台会同时打开一个可见的小红书浏览器窗口</li><li>打开手机小红书 App，扫描二维码并确认登录</li><li>请在 5 分钟内点击“我已扫码”</li><li>系统核对用户ID后才会完成绑定</li></ol><div className="modal-actions"><button className="ghost" onClick={() => setQr(null)}>取消</button><button className="primary" disabled={connecting === qr.account.id} onClick={() => xhs(qr.account, "status")}>{connecting ? "核验身份中…" : "我已扫码，核验身份"}</button></div></section></div> : null}</div>;
 }
 
-function AccountOverview({ account, claims, connecting, xhs, canManage, editStrategy }: { account: Account; claims: Claim[]; connecting: boolean; xhs: (account: Account, action: "qrcode" | "status" | "profile") => Promise<void>; canManage: boolean; editStrategy?: () => void }) {
+function AccountOverview({ account, claims, connecting, xhs, canManage, editStrategy, loginZhihu, loginPending }: { account: Account; claims: Claim[]; connecting: boolean; xhs: (account: Account, action: "qrcode" | "status" | "profile") => Promise<void>; canManage: boolean; editStrategy?: () => void; loginZhihu?: () => void; loginPending?: boolean }) {
   const inProgress = claims.filter((claim) => ["writing", "revision", "review"].includes(claim.status)).length;
   const waiting = claims.filter((claim) => ["approved", "queued", "publishing"].includes(claim.status)).length;
   const published = claims.filter((claim) => claim.status === "published").length;
   const value = (item?: string | number | null) => item === undefined || item === null || item === "" ? "暂无" : item;
+  if (account.platform === "wechat") return <article className="panel account-card"><div className="account-profile-head"><span className="large-avatar" style={{ background: account.color }}>微</span><div><h2>{account.external_display_name || account.name}</h2><p>微信公众号账号记录</p><small>授权与正式发布适配器尚未开放</small></div><span className="account-state error"><i></i>待接入</span></div><p className="account-bio">当前用于区分公众号内容归属、选题、创作和团队审核；不会误调用小红书或知乎的发布能力。</p><div className="account-strategy"><strong>{account.persona || "尚未设置内容定位"}</strong><span>{account.audience ? `受众：${account.audience}` : "设置定位后会用于公众号文章创作"}</span></div><div className="platform-stats"><span>创作中 <strong>{inProgress}</strong></span><span>待发布 <strong>{waiting}</strong></span><span>历史发布 <strong>{published}</strong></span></div>{canManage ? <div className="account-buttons"><button className="outline" onClick={editStrategy}>内容定位</button><button className="primary" disabled>授权设计中</button></div> : <p className="sync-time">只有管理员可以管理公众号授权。</p>}</article>;
+  if (account.platform === "zhihu") return <article className="panel account-card"><div className="account-profile-head"><span className="large-avatar" style={{ background: account.color }}>知</span><div><h2>{account.external_display_name || account.name}</h2><p>{account.status === "online" ? "浏览器登录状态已保存" : "尚未登录知乎"}</p><small>{account.status === "online" ? "独立登录状态已保存在团队主机" : "点击下方按钮打开知乎登录窗口"}</small></div><span className={`account-state ${account.status === "online" ? "" : "error"}`}><i></i>{accountStatus[account.status] || account.status}</span></div><p className="account-bio">知乎账号使用独立浏览器登录态；专栏文章可沿用团队创作、文本审核、发布队列和失败核验流程。</p><div className="account-strategy"><strong>{account.persona || "尚未设置内容定位"}</strong><span>{account.audience ? `受众：${account.audience}` : "设置定位后会用于知乎专栏创作"}</span></div><div className="platform-stats"><span>创作中 <strong>{inProgress}</strong></span><span>待发布 <strong>{waiting}</strong></span><span>历史发布 <strong>{published}</strong></span></div>{canManage ? <div className="account-buttons"><button className="outline" onClick={editStrategy}>内容定位</button><button className="primary" disabled={connecting} onClick={loginZhihu}>{connecting ? "正在检测…" : loginPending ? "我已登录，完成绑定" : account.status === "online" ? "重新登录知乎" : "登录知乎"}</button></div> : <p className="sync-time">只有管理员可以登录和管理知乎账号。</p>}</article>;
   return <article className="panel account-card"><div className="account-profile-head"><span className="large-avatar" style={account.avatar_url ? { backgroundImage: `url(${account.avatar_url})` } : { background: account.color }}>{account.avatar_url ? "" : account.name.slice(0, 1)}</span><div><h2>{account.xhs_nickname || account.name}</h2><p>{account.xhs_red_id ? `小红书号 ${account.xhs_red_id}` : account.xhs_user_id ? `用户ID ${account.xhs_user_id}` : "尚未绑定小红书身份"}</p><small>{account.xhs_user_id ? "登录凭据已保存 · 实时状态需核验" : "尚未保存登录凭据"}</small></div><span className={`account-state ${["login_expired", "unknown", "error"].includes(account.status) ? "error" : ""}`}><i></i>{accountStatus[account.status] || account.status}</span></div><p className="account-bio">{account.profile_bio || (account.status === "online" ? "尚未同步账号简介" : "扫码登录后可读取真实账号概览")}</p><div className="account-strategy"><strong>{account.persona || "尚未设置内容定位"}</strong><span>{account.audience ? `受众：${account.audience}` : "设置定位后才能用于垂直选题研究"}</span>{account.strategy_keywords?.length ? <small>{account.strategy_keywords.map((word) => `#${word}`).join(" ")}</small> : null}</div><div className="xhs-stats"><span><strong>{value(account.following_count)}</strong>关注</span><span><strong>{value(account.followers_count)}</strong>粉丝</span><span><strong>{value(account.interaction_count)}</strong>获赞与收藏</span><span><strong>{value(account.note_count)}</strong>笔记</span></div><div className="platform-stats"><span>创作中 <strong>{inProgress}</strong></span><span>待发布 <strong>{waiting}</strong></span><span>已发布 <strong>{published}</strong></span></div><p className="sync-time">{account.profile_synced_at ? `账号数据同步于 ${dateTime(account.profile_synced_at)}` : "账号公开数据尚未同步"}</p>{canManage ? <div className={`account-buttons ${editStrategy ? "four" : "three"}`}>{editStrategy ? <button className="outline" onClick={editStrategy}>内容定位</button> : null}<button className="outline" disabled={connecting} onClick={() => xhs(account, "status")}>{connecting ? "可见核验中…" : "检查登录"}</button><button className="outline" disabled={connecting || account.status !== "online"} onClick={() => xhs(account, "profile")}>{connecting ? "读取中…" : "同步概览"}</button><button className="primary" disabled={connecting} onClick={() => xhs(account, "qrcode")}>{account.status === "online" ? "重新登录" : "扫码登录"}</button></div> : <p className="sync-time">只有管理员可以登录、核验和同步账号。</p>}</article>;
 }
 

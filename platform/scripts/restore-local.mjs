@@ -11,6 +11,8 @@ if (!archiveArg || !process.argv.includes("--confirm")) {
   throw new Error("用法：npm run restore -- /备份路径/hongshutai-日期.tar.gz --confirm");
 }
 const archive = resolve(archiveArg);
+const managerPort = Number(process.env.HONGSHUTAI_BACKUP_MANAGER_PORT || 18100);
+const workerPort = Number(process.env.HONGSHUTAI_BACKUP_WORKER_PORT || 3000);
 if (!existsSync(archive)) throw new Error(`备份文件不存在：${archive}`);
 
 function portOpen(port) {
@@ -23,7 +25,7 @@ function portOpen(port) {
   });
 }
 
-if (await portOpen(18100) || await portOpen(3000)) {
+if (await portOpen(managerPort) || await portOpen(workerPort)) {
   throw new Error("请先完全退出红薯台，再执行恢复");
 }
 
@@ -42,6 +44,7 @@ try {
   const targets = [
     ["database", join(dataRoot, ".wrangler/state/v3/d1")],
     ["accounts", join(dataRoot, "runtime/accounts")],
+    ["platform-accounts", join(dataRoot, "runtime/platform-accounts")],
     ["config", join(dataRoot, "runtime/config")],
     ["publish-assets", join(dataRoot, "runtime/publish-assets")],
   ].filter(([name]) => manifest.contents.includes(name) && existsSync(join(staging, name)));

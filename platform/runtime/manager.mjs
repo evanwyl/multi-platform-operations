@@ -4,6 +4,8 @@ import { createServer } from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { publishZhihuArticle, saveZhihuCredentials, zhihuAuthStatus } from "./platforms/zhihu-openapi.mjs";
+import { closeZhihuBrowsers, openZhihuBrowserLogin, publishZhihuArticleBrowser, zhihuBrowserAuthStatus } from "./platforms/zhihu-browser.mjs";
 
 const HOST = "127.0.0.1";
 const MANAGER_PORT = Number(process.env.MANAGER_PORT || 18100);
@@ -16,6 +18,7 @@ const managerToken = String(process.env.RUNTIME_MANAGER_TOKEN || "").trim();
 const appRoot = resolve(process.env.HONGSHUTAI_APP_ROOT || process.cwd());
 const dataRoot = resolve(process.env.HONGSHUTAI_DATA_ROOT || process.cwd());
 const root = resolve(dataRoot, "runtime/accounts");
+const platformAccountRoot = resolve(dataRoot, "runtime/platform-accounts");
 const analysisRoot = resolve(dataRoot, "runtime/analysis");
 const publishAssetRoot = resolve(dataRoot, "runtime/publish-assets");
 const trendCoverRoot = resolve(dataRoot, "runtime/trend-covers");
@@ -28,12 +31,14 @@ const promptFiles = {
   research: resolve(appRoot, "runtime/prompts/research-system.md"),
   content: resolve(appRoot, "runtime/prompts/content-system.md"),
   humanizer: resolve(appRoot, "runtime/prompts/humanizer-system.md"),
+  zhihuContent: resolve(appRoot, "runtime/prompts/zhihu-content-system.md"),
 };
 const analysisSchemas = {
   "trend-plan": resolve(appRoot, "runtime/trend-plan.schema.json"),
   "candidate-screen": resolve(appRoot, "runtime/candidate-screen.schema.json"),
   "topic-analysis": resolve(appRoot, "runtime/topic-analysis.schema.json"),
   "content-draft": resolve(appRoot, "runtime/content-draft.schema.json"),
+  "zhihu-article-draft": resolve(appRoot, "runtime/zhihu-article-draft.schema.json"),
 };
 
 process.umask(0o077);
@@ -43,11 +48,12 @@ if (managerToken.length < 32) {
 }
 
 mkdirSync(root, { recursive: true });
+mkdirSync(platformAccountRoot, { recursive: true });
 mkdirSync(analysisRoot, { recursive: true });
 mkdirSync(publishAssetRoot, { recursive: true });
 mkdirSync(trendCoverRoot, { recursive: true });
 mkdirSync(configRoot, { recursive: true });
-for (const directory of [root, analysisRoot, publishAssetRoot, trendCoverRoot, configRoot]) chmodSync(directory, 0o700);
+for (const directory of [root, platformAccountRoot, analysisRoot, publishAssetRoot, trendCoverRoot, configRoot]) chmodSync(directory, 0o700);
 for (const entry of readdirSync(root, { withFileTypes: true })) {
   if (!entry.isDirectory()) continue;
   const accountRoot = join(root, entry.name);
@@ -128,6 +134,12 @@ function saveAISettings(payload) {
 }
 
 function systemPrompt(kind) {
+  if (kind === "zhihu-article-draft") {
+    if (!existsSync(promptFiles.zhihuContent) || !existsSync(promptFiles.humanizer)) {
+      throw Object.assign(new Error("平台内置知乎专家或 Humanizer 规则缺失"), { status: 503 });
+    }
+    return `${readFileSync(promptFiles.zhihuContent, "utf8")}\n\n<EMBEDDED_HUMANIZER_SKILL>\n${readFileSync(promptFiles.humanizer, "utf8")}\n</EMBEDDED_HUMANIZER_SKILL>`;
+  }
   if (kind !== "content-draft") {
     if (!existsSync(promptFiles.research)) throw Object.assign(new Error("平台内置 AI 规则缺失"), { status: 503 });
     return readFileSync(promptFiles.research, "utf8");
@@ -484,6 +496,31 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/slots") {
       return json(response, 200, { pending: acquireQueue.length, slots: slots.map((slot) => ({ port: slot.port, purpose: slot.purpose, accountId: slot.accountId, active: Boolean(slot.child), busy: slot.leased, stopping: slot.stopping, protectedUntil: slot.protectedUntil, lastUsed: slot.lastUsed })) });
     }
+    if (request.method === "GET" && url.pathname === "/zhihu/auth-status") {
+      const accountId = url.searchParams.get("accountId") || "";
+      const openapi = zhihuAuthStatus(platformAccountRoot, accountId);
+      if (openapi.configured) return json(response, 200, openapi);
+      return json(response, 200, await zhihuBrowserAuthStatus(platformAccountRoot, appRoot, accountId));
+    }
+    if (request.method === "POST" && url.pathname === "/zhihu/browser-login") {
+      const payload = await body(request);
+      return json(response, 200, await openZhihuBrowserLogin(platformAccountRoot, appRoot, payload.accountId));
+    }
+    if (request.method === "POST" && url.pathname === "/zhihu/browser-login-complete") {
+      const payload = await body(request);
+      return json(response, 200, await zhihuBrowserAuthStatus(platformAccountRoot, appRoot, payload.accountId, true));
+    }
+    if (request.method === "POST" && url.pathname === "/zhihu/credentials") {
+      const payload = await body(request);
+      return json(response, 200, saveZhihuCredentials(platformAccountRoot, payload.accountId, payload.appKey, payload.appSecret));
+    }
+    if (request.method === "POST" && url.pathname === "/zhihu/publish") {
+      const payload = await body(request);
+      const result = payload.authMethod === "openapi"
+        ? await publishZhihuArticle(platformAccountRoot, payload)
+        : await publishZhihuArticleBrowser(platformAccountRoot, appRoot, payload);
+      return json(response, 200, result);
+    }
     if (request.method === "GET" && url.pathname === "/publish-asset") {
       const assetPath = resolve(url.searchParams.get("path") || "");
       const relative = assetPath.slice(publishAssetRoot.length + 1);
@@ -581,6 +618,7 @@ sweep.unref();
 
 function shutdown() {
   cancelAnalysis();
+  void closeZhihuBrowsers();
   for (const slot of slots) stop(slot, "平台关闭");
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3500).unref();

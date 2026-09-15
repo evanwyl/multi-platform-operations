@@ -2,6 +2,7 @@ import { createPasswordHash, currentUser, publicUser, rejectCrossSiteMutation } 
 import { audit, database, ensureDatabase } from "../../../lib/database";
 import { can, forbidden, roleGroups } from "../../../lib/permissions";
 import { managerFetch } from "../../../lib/runtime-client";
+import { contentTypeForPlatform, isPlatform, requiresReviewImages } from "../../../lib/platforms";
 
 const statusLabels: Record<string, string> = {
   writing: "创作中", review: "待审核", revision: "待修改", approved: "待发布",
@@ -58,7 +59,7 @@ export async function GET(request: Request) {
       LEFT JOIN claims latest_claim ON latest_claim.id=(SELECT c.id FROM claims c WHERE c.topic_id=t.id ORDER BY c.updated_at DESC LIMIT 1)
       LEFT JOIN users claim_owner ON claim_owner.id=latest_claim.owner_id
       WHERE t.archived_at IS NULL ORDER BY t.created_at DESC`).all<DbRow>(),
-    db.prepare(`SELECT c.*,t.title AS topic_title,a.name AS account_name,a.color AS account_color,u.name AS owner_name,
+    db.prepare(`SELECT c.*,t.title AS topic_title,t.platform AS topic_platform,a.name AS account_name,a.color AS account_color,a.platform AS account_platform,u.name AS owner_name,
       publisher.name AS publisher_name
       FROM claims c JOIN topics t ON t.id=c.topic_id JOIN accounts a ON a.id=c.account_id JOIN users u ON u.id=c.owner_id
       LEFT JOIN users publisher ON publisher.id=c.publisher_id
@@ -126,16 +127,18 @@ export async function POST(request: Request) {
 
   if (action === "create_account") {
     const roles = JSON.parse(user.roles) as string[];
-    if (!roles.includes("admin")) return Response.json({ error: "只有管理员可以添加小红书账号" }, { status: 403 });
+    if (!roles.includes("admin")) return Response.json({ error: "只有管理员可以添加平台账号" }, { status: 403 });
     const name = String(data.name ?? "").trim();
+    const platform = isPlatform(data.platform) ? data.platform : "xiaohongshu";
     if (!name) return Response.json({ error: "请填写账号备注名称" }, { status: 400 });
     const colors = ["#6846d6", "#178f78", "#d5723b", "#3d79c5", "#c9465d"];
     const id = crypto.randomUUID();
-    const count = await db.prepare("SELECT COUNT(*) AS total FROM accounts WHERE is_demo=0").first<{ total: number }>();
-    if ((count?.total ?? 0) >= 5) return Response.json({ error: "当前版本最多管理5个小红书账号" }, { status: 409 });
-    await db.prepare("INSERT INTO accounts (id,name,status,color,is_demo,updated_at) VALUES (?,?,'login_expired',?,0,?)")
-      .bind(id, name, colors[(count?.total ?? 0) % colors.length], now).run();
-    await audit(user.id, "添加小红书账号", "account", id, name);
+    const count = await db.prepare("SELECT COUNT(*) AS total FROM accounts WHERE is_demo=0 AND platform=?").bind(platform).first<{ total: number }>();
+    const label = platform === "zhihu" ? "知乎" : platform === "wechat" ? "微信公众号" : "小红书";
+    if ((count?.total ?? 0) >= 5) return Response.json({ error: `当前版本最多管理5个${label}账号` }, { status: 409 });
+    await db.prepare("INSERT INTO accounts (id,name,status,color,is_demo,platform,updated_at) VALUES (?,?,'login_expired',?,0,?,?)")
+      .bind(id, name, colors[(count?.total ?? 0) % colors.length], platform, now).run();
+    await audit(user.id, `添加${label}账号`, "account", id, name);
     return Response.json({ ok: true, id }, { status: 201 });
   }
 
@@ -196,10 +199,11 @@ export async function POST(request: Request) {
     if (!can(user, roleGroups.operate)) return forbidden("只有管理员或内容运营可以创建选题");
     const title = String(data.title ?? "").trim();
     if (!title) return Response.json({ error: "请输入选题标题" }, { status: 400 });
+    const platform = isPlatform(data.platform) ? data.platform : "xiaohongshu";
     const id = crypto.randomUUID();
-    await db.prepare("INSERT INTO topics (id,title,source_url,relevance,status,created_by,created_at) VALUES (?,?,?,?,?,?,?)")
-      .bind(id, title, String(data.source_url ?? ""), String(data.relevance ?? "中"), "unclaimed", user.id, now).run();
-    await audit(user.id, "创建选题", "topic", id, title);
+    await db.prepare("INSERT INTO topics (id,title,source_url,relevance,status,platform,source_type,source_external_id,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+      .bind(id, title, String(data.source_url ?? ""), String(data.relevance ?? "中"), "unclaimed", platform, String(data.source_type ?? "manual").slice(0, 40), String(data.source_external_id ?? "").slice(0, 255) || null, user.id, now).run();
+    await audit(user.id, `创建${platform === "zhihu" ? "知乎" : "小红书"}选题`, "topic", id, title);
     return Response.json({ ok: true, id }, { status: 201 });
   }
 
@@ -221,19 +225,22 @@ export async function POST(request: Request) {
     const topicId = String(data.topic_id ?? "");
     const accountId = String(data.account_id ?? "");
     if (!topicId || !accountId) return Response.json({ error: "请选择选题和账号" }, { status: 400 });
-    const source = await db.prepare(`SELECT s.feed_id,s.processing_status,s.detail_text FROM topics t
+    const source = await db.prepare(`SELECT t.platform,s.feed_id,s.processing_status,s.detail_text FROM topics t
       LEFT JOIN topic_insights i ON i.topic_id=t.id LEFT JOIN trend_samples s ON s.feed_id=json_extract(i.source_feed_ids,'$[0]')
-      WHERE t.id=?`).bind(topicId).first<{ feed_id: string | null; processing_status: string | null; detail_text: string | null }>();
+      WHERE t.id=?`).bind(topicId).first<{ platform: string; feed_id: string | null; processing_status: string | null; detail_text: string | null }>();
     if (source?.feed_id && (source.processing_status !== "success" || !source.detail_text)) {
       return Response.json({ error: "这个自动选题的来源正文尚未验证，暂时不能认领创作" }, { status: 409 });
     }
+    const account = await db.prepare("SELECT id,platform FROM accounts WHERE id=? AND is_demo=0").bind(accountId).first<{ id: string; platform: string }>();
+    if (!account) return Response.json({ error: "发布账号不存在" }, { status: 404 });
+    if (source?.platform && source.platform !== account.platform) return Response.json({ error: "选题平台与发布账号不一致，请选择同平台账号" }, { status: 409 });
     const existing = await db.prepare("SELECT id FROM claims WHERE topic_id=? AND account_id=? AND status NOT IN ('published','archived')").bind(topicId, accountId).first();
     if (existing) return Response.json({ error: "该选题已被这个账号认领" }, { status: 409 });
     const id = crypto.randomUUID();
     try {
       await db.batch([
-        db.prepare("INSERT INTO claims (id,topic_id,account_id,owner_id,angle,status,created_at,updated_at) VALUES (?,?,?,?,?,'writing',?,?)")
-          .bind(id, topicId, accountId, user.id, String(data.angle ?? ""), now, now),
+        db.prepare("INSERT INTO claims (id,topic_id,account_id,owner_id,angle,status,content_type,created_at,updated_at) VALUES (?,?,?,?,?,'writing',?,?,?)")
+          .bind(id, topicId, accountId, user.id, String(data.angle ?? ""), contentTypeForPlatform(account.platform as "xiaohongshu" | "zhihu" | "wechat"), now, now),
         db.prepare("UPDATE topics SET status='claimed' WHERE id=?").bind(topicId),
       ]);
     } catch (error) {
@@ -282,12 +289,12 @@ export async function POST(request: Request) {
   if (action === "submit_review") {
     if (!can(user, roleGroups.operate)) return forbidden("只有管理员或内容运营可以提交审核");
     const id = String(data.id ?? "");
-    const claim = await db.prepare("SELECT owner_id,title,body,publish_images,status FROM claims WHERE id=?").bind(id).first<{ owner_id: string; title: string; body: string; publish_images: string; status: string }>();
+    const claim = await db.prepare("SELECT owner_id,title,body,publish_images,status,content_type FROM claims WHERE id=?").bind(id).first<{ owner_id: string; title: string; body: string; publish_images: string; status: string; content_type: string }>();
     if (!claim) return Response.json({ error: "内容任务不存在" }, { status: 404 });
     if (!["writing", "revision"].includes(claim.status)) return Response.json({ error: "只有创作中或待修改的内容可以提交审核" }, { status: 409 });
     if (!claim.title.trim() || !claim.body.trim()) return Response.json({ error: "标题和正文填写完整后才能提交" }, { status: 400 });
     const images = JSON.parse(claim.publish_images || "[]") as string[];
-    if (!images.length) return Response.json({ error: "请先上传至少一张最终图片，再提交图文审核" }, { status: 400 });
+    if (requiresReviewImages(claim.content_type) && !images.length) return Response.json({ error: "请先上传至少一张最终图片，再提交图文审核" }, { status: 400 });
     await db.prepare("UPDATE claims SET status='review',review_comment='',updated_at=? WHERE id=? AND status IN ('writing','revision')").bind(now, id).run();
     await audit(user.id, "提交审核", "claim", id);
     return Response.json({ ok: true });
@@ -299,16 +306,17 @@ export async function POST(request: Request) {
     const result = data.result === "approve" ? "approved" : "revision";
     const comment = String(data.comment ?? "").trim();
     if (result === "revision" && !comment) return Response.json({ error: "退回时必须填写原因" }, { status: 400 });
-    const claim = await db.prepare("SELECT title,body,tags,creative_json,version_number,publish_images,status FROM claims WHERE id=?").bind(id).first<Record<string, unknown>>();
+    const claim = await db.prepare("SELECT title,body,tags,creative_json,version_number,publish_images,status,content_type FROM claims WHERE id=?").bind(id).first<Record<string, unknown>>();
     if (!claim || claim.status !== "review") return Response.json({ error: "内容当前不在待审核状态" }, { status: 409 });
     const reviewImages = JSON.parse(String(claim.publish_images || "[]")) as string[];
-    if (result === "approved" && !reviewImages.length) return Response.json({ error: "缺少最终图片，不能通过图文审核" }, { status: 400 });
+    if (result === "approved" && requiresReviewImages(claim.content_type) && !reviewImages.length) return Response.json({ error: "缺少最终图片，不能通过图文审核" }, { status: 400 });
     const snapshot = result === "approved" ? JSON.stringify({
       title: claim.title,
       body: claim.body,
       tags: JSON.parse(String(claim.tags)),
       creative: JSON.parse(String(claim.creative_json || "{}")),
       images: reviewImages,
+      content_type: claim.content_type,
       version: claim.version_number,
       approved_at: now,
     }) : null;
