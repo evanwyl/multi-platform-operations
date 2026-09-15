@@ -10,6 +10,11 @@ export const accounts = sqliteTable("accounts", {
   color: text("color").notNull(),
   mcpPort: integer("mcp_port").notNull().default(18060),
   isDemo: integer("is_demo").notNull().default(0),
+  platform: text("platform").notNull().default("xiaohongshu"),
+  externalUserId: text("external_user_id"),
+  externalDisplayName: text("external_display_name"),
+  authMethod: text("auth_method").notNull().default(""),
+  identityVerifiedAt: text("identity_verified_at"),
   xhsUserId: text("xhs_user_id"),
   xhsNickname: text("xhs_nickname"),
   xhsRedId: text("xhs_red_id"),
@@ -23,6 +28,7 @@ export const accounts = sqliteTable("accounts", {
   updatedAt: text("updated_at").notNull(),
 }, (table) => [
   uniqueIndex("idx_accounts_xhs_user_id").on(table.xhsUserId),
+  uniqueIndex("idx_accounts_platform_external_user").on(table.platform, table.externalUserId),
 ]);
 
 export const trendSettings = sqliteTable("trend_settings", {
@@ -89,6 +95,87 @@ export const topicInsights = sqliteTable("topic_insights", {
   score: integer("score").notNull().default(0),
   createdAt: text("created_at").notNull(),
 });
+
+export const articleResearchSamples = sqliteTable("article_research_samples", {
+  id: text("id").primaryKey(),
+  canonicalUrl: text("canonical_url").notNull().unique(),
+  title: text("title").notNull(),
+  sourceUrl: text("source_url").notNull(),
+  sourceDomain: text("source_domain").notNull().default(""),
+  authorName: text("author_name").notNull().default(""),
+  matchedKeywords: text("matched_keywords").notNull().default("[]"),
+  searchEngines: text("search_engines").notNull().default("[]"),
+  snippet: text("snippet").notNull().default(""),
+  detailText: text("detail_text").notNull().default(""),
+  publishedAt: text("published_at"),
+  bestRank: integer("best_rank").notNull().default(999),
+  occurrenceCount: integer("occurrence_count").notNull().default(1),
+  relevanceScore: integer("relevance_score").notNull().default(0),
+  trendScore: integer("trend_score").notNull().default(0),
+  processingStatus: text("processing_status").notNull().default("pending"),
+  detailError: text("detail_error").notNull().default(""),
+  status: text("status").notNull().default("new"),
+  firstSeenAt: text("first_seen_at").notNull(),
+  lastSeenAt: text("last_seen_at").notNull(),
+});
+
+// The runtime migration in lib/database.ts remains the compatibility authority for
+// existing customer databases. These declarations keep new platform work visible
+// to Drizzle generation instead of silently recreating Xiaohongshu-only fields.
+export const topics = sqliteTable("topics", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  sourceUrl: text("source_url").notNull().default(""),
+  relevance: text("relevance").notNull().default("中"),
+  status: text("status").notNull().default("unclaimed"),
+  platform: text("platform").notNull().default("xiaohongshu"),
+  sourceType: text("source_type").notNull().default("manual"),
+  sourceExternalId: text("source_external_id"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull(),
+  archivedAt: text("archived_at"),
+}, (table) => [index("idx_topics_status_created").on(table.status, table.createdAt)]);
+
+export const claims = sqliteTable("claims", {
+  id: text("id").primaryKey(),
+  topicId: text("topic_id").notNull().references(() => topics.id),
+  accountId: text("account_id").notNull().references(() => accounts.id),
+  ownerId: text("owner_id").notNull(),
+  angle: text("angle").notNull().default(""),
+  status: text("status").notNull().default("writing"),
+  contentType: text("content_type").notNull().default("xiaohongshu_note"),
+  externalContentId: text("external_content_id"),
+  publishedUrl: text("published_url"),
+  title: text("title").notNull().default(""),
+  body: text("body").notNull().default(""),
+  tags: text("tags").notNull().default("[]"),
+  snapshot: text("snapshot"),
+  creativeJson: text("creative_json").notNull().default("{}"),
+  versionNumber: integer("version_number").notNull().default(0),
+  publishImages: text("publish_images").notNull().default("[]"),
+  publishError: text("publish_error").notNull().default(""),
+  publishedAt: text("published_at"),
+  publisherId: text("publisher_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  index("idx_claims_owner_status").on(table.ownerId, table.status),
+  index("idx_claims_account_status").on(table.accountId, table.status),
+]);
+
+export const publishJobs = sqliteTable("publish_jobs", {
+  id: text("id").primaryKey(),
+  claimId: text("claim_id").notNull().references(() => claims.id),
+  idempotencyKey: text("idempotency_key").notNull().unique(),
+  status: text("status").notNull().default("publishing"),
+  requestedBy: text("requested_by").notNull(),
+  attemptCount: integer("attempt_count").notNull().default(1),
+  lastError: text("last_error").notNull().default(""),
+  resultDetail: text("result_detail").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  completedAt: text("completed_at"),
+}, (table) => [index("idx_publish_jobs_claim_status").on(table.claimId, table.status, table.createdAt)]);
 
 export const claimVersions = sqliteTable("claim_versions", {
   id: text("id").primaryKey(),

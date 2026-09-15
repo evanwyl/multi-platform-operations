@@ -137,6 +137,15 @@ test("protects the local manager and repairs cookie permissions", async (context
   assert.equal(await cover.text(), "image-bytes");
   const rejectedCover = await fetch(`http://127.0.0.1:${port}/trend-covers/${coverName}?key=wrong`);
   assert.equal(rejectedCover.status, 404);
+  const zhihuSave = await fetch(`http://127.0.0.1:${port}/zhihu/credentials`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ accountId: "zhihu-account-123", appKey: "example-token", appSecret: "s".repeat(32) }),
+  });
+  assert.equal(zhihuSave.status, 200);
+  const zhihuStatus = await fetch(`http://127.0.0.1:${port}/zhihu/auth-status?accountId=zhihu-account-123`, { headers: { authorization: `Bearer ${token}` } });
+  assert.deepEqual(await zhihuStatus.json(), { configured: true, auth_method: "openapi" });
+  assert.equal((await stat(resolve(work, "runtime/platform-accounts/zhihu-account-123/openapi.json"))).mode & 0o777, 0o600);
 });
 
 test("implements the native macOS file chooser for review image uploads", async () => {
@@ -168,7 +177,7 @@ test("backs up and restores local customer data without unsafe archive paths", a
   await writeFile(database, "database-v1");
   await writeFile(account, "cookie-v1");
   const archive = resolve(work, "safe-backup.tar.gz");
-  const environment = { ...process.env, HONGSHUTAI_APP_ROOT: work, HONGSHUTAI_DATA_ROOT: work };
+  const environment = { ...process.env, HONGSHUTAI_APP_ROOT: work, HONGSHUTAI_DATA_ROOT: work, HONGSHUTAI_BACKUP_MANAGER_PORT: "29181", HONGSHUTAI_BACKUP_WORKER_PORT: "29300" };
   const backup = spawnSync(process.execPath, [resolve(projectRoot, "scripts/backup-local.mjs"), archive], { env: environment, encoding: "utf8" });
   assert.equal(backup.status, 0, backup.stderr);
   const listing = spawnSync("tar", ["-tzf", archive], { encoding: "utf8" });
@@ -194,11 +203,13 @@ test("packages a self-contained unsigned macOS app without customer data", async
   assert.match(service, /HONGSHUTAI_DATA_ROOT/);
   assert.match(packager, /privateAsset of \["generated", "trend-covers"\]/);
   assert.match(packager, /旧版本已归档/);
+  assert.match(packager, /CFBundleShortVersionString/);
+  assert.match(packager, /bundleBuildVersion/);
   assert.match(packager, /renameSync\(resolve\(outputRoot, entry\), safeDestination\)/);
   assert.match(packager, /verbatimSymlinks: true/);
   assert.match(packager, /assertPortableSymlinks\(mountedApp\)/);
   assert.match(packager, /assertNoCustomerData\(mountedApp\)/);
-  for (const forbidden of ["team-config.json", "cookies.json", "ai.json", "runtime/accounts", "runtime/publish-assets"]) {
+  for (const forbidden of ["team-config.json", "cookies.json", "ai.json", "runtime/accounts", "runtime/platform-accounts", "runtime/publish-assets"]) {
     assert.match(packager, new RegExp(forbidden.replace("/", "\\/")));
   }
   assert.match(packager, /codesign.*--verify.*--deep.*--strict/s);

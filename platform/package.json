@@ -1,6 +1,6 @@
 {
   "name": "hongshutai-local",
-  "version": "0.14.9",
+  "version": "0.16.11",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -24,6 +24,7 @@
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
     "drizzle-orm": "0.45.2",
+    "playwright-core": "^1.55.0",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },

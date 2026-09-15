@@ -30,7 +30,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## JavaScript 依赖
 
-直接运行依赖 Drizzle ORM（Apache-2.0）、React（MIT）和 React DOM（MIT）。构建及开发工具的许可证由锁文件对应的软件包提供。正式发布流程应生成并随安装包附带完整的软件物料清单（SBOM）与许可证汇总。
+直接运行依赖 Drizzle ORM（Apache-2.0）、React（MIT）、React DOM（MIT）和 Playwright Core（Apache-2.0）。构建及开发工具的许可证由锁文件对应的软件包提供。正式发布流程应生成并随安装包附带完整的软件物料清单（SBOM）与许可证汇总。
+
+## Chromium
+
+安装包内置 Playwright 使用的 Chromium，仅用于知乎账号的可见浏览器登录和后续发布适配。Chromium 采用 BSD 风格许可证，并包含各自使用不同开源许可证的第三方组件；完整许可证文件必须与浏览器运行时一同保留在 App 内。
 
 ## Node.js
 

@@ -9,6 +9,8 @@ const dataRoot = resolve(process.env.HONGSHUTAI_DATA_ROOT || appRoot);
 const backupRoot = resolve(dataRoot, "backups");
 const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 const destination = resolve(process.argv[2] || join(backupRoot, `hongshutai-${timestamp}.tar.gz`));
+const managerPort = Number(process.env.HONGSHUTAI_BACKUP_MANAGER_PORT || 18100);
+const workerPort = Number(process.env.HONGSHUTAI_BACKUP_WORKER_PORT || 3000);
 
 function portOpen(port) {
   return new Promise((resolvePort) => {
@@ -20,13 +22,14 @@ function portOpen(port) {
   });
 }
 
-if (await portOpen(18100) || await portOpen(3000)) {
+if (await portOpen(managerPort) || await portOpen(workerPort)) {
   throw new Error("请先完全退出红薯台，再执行备份，避免复制到不一致的数据库状态");
 }
 
 const sources = [
   ["database", join(dataRoot, ".wrangler/state/v3/d1")],
   ["accounts", join(dataRoot, "runtime/accounts")],
+  ["platform-accounts", join(dataRoot, "runtime/platform-accounts")],
   ["config", join(dataRoot, "runtime/config")],
   ["publish-assets", join(dataRoot, "runtime/publish-assets")],
 ].filter(([, source]) => existsSync(source));

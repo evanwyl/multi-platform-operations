@@ -29,6 +29,8 @@ const schemaStatements = [
     content_pillars TEXT NOT NULL DEFAULT '[]', strategy_keywords TEXT NOT NULL DEFAULT '[]', excluded_topics TEXT NOT NULL DEFAULT '[]',
     queue_count INTEGER NOT NULL DEFAULT 0, color TEXT NOT NULL,
     mcp_port INTEGER NOT NULL DEFAULT 18060, is_demo INTEGER NOT NULL DEFAULT 0,
+    platform TEXT NOT NULL DEFAULT 'xiaohongshu', external_user_id TEXT, external_display_name TEXT,
+    auth_method TEXT NOT NULL DEFAULT '', identity_verified_at TEXT,
     xhs_user_id TEXT, xhs_nickname TEXT,
     xhs_red_id TEXT, profile_bio TEXT, avatar_url TEXT,
     following_count TEXT, followers_count TEXT, interaction_count TEXT,
@@ -38,11 +40,13 @@ const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS topics (
     id TEXT PRIMARY KEY, title TEXT NOT NULL, source_url TEXT NOT NULL DEFAULT '',
     relevance TEXT NOT NULL DEFAULT '中', status TEXT NOT NULL DEFAULT 'unclaimed',
+    platform TEXT NOT NULL DEFAULT 'xiaohongshu', source_type TEXT NOT NULL DEFAULT 'manual', source_external_id TEXT,
     created_by TEXT NOT NULL, created_at TEXT NOT NULL, archived_at TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS claims (
     id TEXT PRIMARY KEY, topic_id TEXT NOT NULL, account_id TEXT NOT NULL,
     owner_id TEXT NOT NULL, angle TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'writing',
+    content_type TEXT NOT NULL DEFAULT 'xiaohongshu_note', external_content_id TEXT, published_url TEXT,
     title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]',
     review_comment TEXT NOT NULL DEFAULT '', reviewer_id TEXT, snapshot TEXT,
     creative_json TEXT NOT NULL DEFAULT '{}', creation_status TEXT NOT NULL DEFAULT 'idle',
@@ -119,6 +123,16 @@ const schemaStatements = [
     score INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
     FOREIGN KEY(topic_id) REFERENCES topics(id)
   )`,
+  `CREATE TABLE IF NOT EXISTS article_research_samples (
+    id TEXT PRIMARY KEY, canonical_url TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+    source_url TEXT NOT NULL, source_domain TEXT NOT NULL DEFAULT '', author_name TEXT NOT NULL DEFAULT '',
+    matched_keywords TEXT NOT NULL DEFAULT '[]', search_engines TEXT NOT NULL DEFAULT '[]',
+    snippet TEXT NOT NULL DEFAULT '', detail_text TEXT NOT NULL DEFAULT '', published_at TEXT,
+    best_rank INTEGER NOT NULL DEFAULT 999, occurrence_count INTEGER NOT NULL DEFAULT 1,
+    relevance_score INTEGER NOT NULL DEFAULT 0, trend_score INTEGER NOT NULL DEFAULT 0,
+    processing_status TEXT NOT NULL DEFAULT 'pending', detail_error TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'new', first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL
+  )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)`,
   `CREATE INDEX IF NOT EXISTS idx_topics_status_created ON topics(status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_claims_owner_status ON claims(owner_id, status)`,
@@ -129,6 +143,7 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_trend_samples_status_seen ON trend_samples(status, last_seen_at)`,
   `CREATE INDEX IF NOT EXISTS idx_trend_scans_started ON trend_scans(started_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_article_research_status_seen ON article_research_samples(status, last_seen_at)`,
 ];
 
 let databaseInitialization: Promise<void> | null = null;
@@ -159,6 +174,21 @@ async function initializeDatabase() {
   for (const [name, type] of strategyColumns) {
     const column = await db.prepare(`SELECT name FROM pragma_table_info('accounts') WHERE name='${name}'`).first();
     if (!column) await db.prepare(`ALTER TABLE accounts ADD COLUMN ${name} ${type}`).run();
+  }
+  const accountPlatformColumns = [
+    ["platform", "TEXT NOT NULL DEFAULT 'xiaohongshu'"], ["external_user_id", "TEXT"],
+    ["external_display_name", "TEXT"], ["auth_method", "TEXT NOT NULL DEFAULT ''"], ["identity_verified_at", "TEXT"],
+  ] as const;
+  for (const [name, type] of accountPlatformColumns) {
+    const column = await db.prepare(`SELECT name FROM pragma_table_info('accounts') WHERE name='${name}'`).first();
+    if (!column) await db.prepare(`ALTER TABLE accounts ADD COLUMN ${name} ${type}`).run();
+  }
+  const topicPlatformColumns = [
+    ["platform", "TEXT NOT NULL DEFAULT 'xiaohongshu'"], ["source_type", "TEXT NOT NULL DEFAULT 'manual'"], ["source_external_id", "TEXT"],
+  ] as const;
+  for (const [name, type] of topicPlatformColumns) {
+    const column = await db.prepare(`SELECT name FROM pragma_table_info('topics') WHERE name='${name}'`).first();
+    if (!column) await db.prepare(`ALTER TABLE topics ADD COLUMN ${name} ${type}`).run();
   }
   const trendSampleColumns = [
     ["xsec_token", "TEXT NOT NULL DEFAULT ''"], ["detail_text", "TEXT NOT NULL DEFAULT ''"],
@@ -216,6 +246,16 @@ async function initializeDatabase() {
     const column = await db.prepare(`SELECT name FROM pragma_table_info('claims') WHERE name='${name}'`).first();
     if (!column) await db.prepare(`ALTER TABLE claims ADD COLUMN ${name} ${type}`).run();
   }
+  const claimPlatformColumns = [
+    ["content_type", "TEXT NOT NULL DEFAULT 'xiaohongshu_note'"], ["external_content_id", "TEXT"], ["published_url", "TEXT"],
+  ] as const;
+  for (const [name, type] of claimPlatformColumns) {
+    const column = await db.prepare(`SELECT name FROM pragma_table_info('claims') WHERE name='${name}'`).first();
+    if (!column) await db.prepare(`ALTER TABLE claims ADD COLUMN ${name} ${type}`).run();
+  }
+  await db.prepare("UPDATE accounts SET platform='xiaohongshu' WHERE platform IS NULL OR platform='' ").run();
+  await db.prepare("UPDATE topics SET platform='xiaohongshu',source_type=CASE WHEN source_url!='' THEN 'xhs_trend' ELSE 'manual' END WHERE platform IS NULL OR platform='' ").run();
+  await db.prepare("UPDATE claims SET content_type='xiaohongshu_note' WHERE content_type IS NULL OR content_type='' ").run();
   await db.prepare(`UPDATE claims SET publisher_id=(SELECT actor_id FROM audit_logs
     WHERE object_type='claim' AND object_id=claims.id AND action='通过小红书MCP发布内容'
     ORDER BY created_at DESC LIMIT 1) WHERE publisher_id IS NULL AND status='published'`).run();
@@ -223,6 +263,7 @@ async function initializeDatabase() {
   await db.prepare("UPDATE accounts SET status='login_expired' WHERE is_demo=0 AND xhs_user_id IS NULL AND status='online'").run();
   await db.prepare("DROP INDEX IF EXISTS idx_accounts_mcp_port_real").run();
   await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_xhs_user_id ON accounts(xhs_user_id) WHERE xhs_user_id IS NOT NULL").run();
+  await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_platform_external_user ON accounts(platform,external_user_id) WHERE external_user_id IS NOT NULL").run();
   await db.prepare(`UPDATE claims SET status='archived',updated_at=? WHERE id IN (
     SELECT id FROM (
       SELECT id,ROW_NUMBER() OVER (

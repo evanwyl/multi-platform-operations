@@ -6,15 +6,15 @@ import { managerFetch } from "../../../lib/runtime-client";
 
 type PublishClaim = {
   id: string; account_id: string; account_name: string; account_status: string;
-  xhs_user_id: string | null; xhs_nickname: string | null; status: string;
+  account_platform: string; auth_method: string; external_user_id: string | null;
+  xhs_user_id: string | null; xhs_nickname: string | null; status: string; content_type: string;
   snapshot: string | null; publish_images: string; title: string; body: string; tags: string; updated_at: string;
 };
 
 const PUBLISH_TIMEOUT_MS = 6 * 60 * 1000;
 const INTERRUPTED_RECOVERY_MS = PUBLISH_TIMEOUT_MS + 2 * 60 * 1000;
-
 function isUncertainPublishError(message: string) {
-  return /超过\s*\d+\s*分钟|执行中断|连接已中断|页面加载超时|状态暂时无法确认/i.test(message);
+  return /超过\s*\d+\s*分钟|执行中断|连接已中断|页面加载超时|状态暂时无法确认|知乎发布请求未完成|无法解析的响应|发布按钮已触发|结果无法确认/i.test(message);
 }
 
 async function runtime(path: "acquire" | "release" | "discard", accountId: string) {
@@ -37,8 +37,8 @@ export async function POST(request: Request) {
   const data = await request.json() as { action?: string; claim_id?: string; reason?: string; outcome?: string };
   const claimId = String(data.claim_id ?? "");
   const db = database();
-  const claim = await db.prepare(`SELECT c.id,c.account_id,c.status,c.snapshot,c.publish_images,c.title,c.body,c.tags,c.updated_at,
-    a.name AS account_name,a.status AS account_status,a.xhs_user_id,a.xhs_nickname
+  const claim = await db.prepare(`SELECT c.id,c.account_id,c.status,c.content_type,c.snapshot,c.publish_images,c.title,c.body,c.tags,c.updated_at,
+    a.name AS account_name,a.status AS account_status,a.platform AS account_platform,a.auth_method,a.external_user_id,a.xhs_user_id,a.xhs_nickname
     FROM claims c JOIN accounts a ON a.id=c.account_id WHERE c.id=? AND a.is_demo=0`).bind(claimId).first<PublishClaim>();
   if (!claim) return Response.json({ error: "发布任务不存在" }, { status: 404 });
 
@@ -87,10 +87,13 @@ export async function POST(request: Request) {
 
   if (data.action === "publish_now") {
     if (!["approved", "queued", "failed"].includes(claim.status)) return Response.json({ error: "当前内容不能执行发布" }, { status: 409 });
-    if (!claim.xhs_user_id) return Response.json({ error: `${claim.account_name} 尚未完成登录和身份绑定` }, { status: 409 });
     const frozen = claim.snapshot ? JSON.parse(claim.snapshot) as { title?: string; body?: string; tags?: string[]; images?: string[] } : null;
     const images = Array.isArray(frozen?.images) ? frozen.images : [];
-    if (!images.length) return Response.json({ error: "审核快照中没有图片，请退回创作页补充后重新审核" }, { status: 400 });
+    const isZhihuArticle = claim.account_platform === "zhihu" && claim.content_type === "zhihu_article";
+    if (claim.account_platform === "wechat") return Response.json({ error: "微信公众号发布适配器尚未开放，不能调用小红书发布链路" }, { status: 409 });
+    if (!isZhihuArticle && !claim.xhs_user_id) return Response.json({ error: `${claim.account_name} 尚未完成登录和身份绑定` }, { status: 409 });
+    if (!isZhihuArticle && !images.length) return Response.json({ error: "审核快照中没有图片，请退回创作页补充后重新审核" }, { status: 400 });
+    if (isZhihuArticle && !["browser", "openapi"].includes(claim.auth_method)) return Response.json({ error: `${claim.account_name} 尚未完成知乎登录` }, { status: 409 });
     const title = String(frozen?.title || claim.title || "").trim();
     const body = String(frozen?.body || claim.body || "").trim();
     const tags = Array.isArray(frozen?.tags) ? frozen.tags : JSON.parse(claim.tags || "[]") as string[];
@@ -114,13 +117,33 @@ export async function POST(request: Request) {
           .bind(attemptId, jobId, startedAt),
       ]);
     } catch {
-      await db.prepare("UPDATE claims SET status='approved',publish_error='发布记录初始化失败，尚未请求小红书',updated_at=? WHERE id=? AND status='publishing' AND updated_at=?")
+      await db.prepare("UPDATE claims SET status='approved',publish_error='发布记录初始化失败，尚未请求平台发布服务',updated_at=? WHERE id=? AND status='publishing' AND updated_at=?")
         .bind(new Date().toISOString(), claim.id, startedAt).run();
       return Response.json({ error: "无法创建发布记录，本次没有请求小红书，请稍后重试" }, { status: 500 });
     }
     let acquired = false;
     let publishDispatched = false;
     try {
+      if (isZhihuArticle) {
+        publishDispatched = true;
+        const response = await managerFetch("/zhihu/publish", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ accountId: claim.account_id, title, body, authMethod: claim.auth_method, creationStatement: "ai_creation" }),
+        }).catch(() => null);
+        if (!response) throw new Error("知乎发布请求未完成：本机运行管理器未启动");
+        const payload = await response.json() as { contentToken?: string; url?: string; detail?: string; error?: string };
+        if (!response.ok) throw new Error(payload.error || "知乎发布失败");
+        const publishedAt = new Date().toISOString();
+        const detail = String(payload.detail || "知乎专栏已发布");
+        await db.batch([
+          db.prepare("UPDATE claims SET status='published',published_at=?,published_url=?,external_content_id=?,publish_error='',updated_at=? WHERE id=? AND status='publishing'")
+            .bind(publishedAt, payload.url || null, payload.contentToken || null, publishedAt, claim.id),
+          db.prepare("UPDATE publish_jobs SET status='succeeded',result_detail=?,updated_at=?,completed_at=? WHERE id=? AND status='publishing'").bind(detail, publishedAt, publishedAt, jobId),
+          db.prepare("UPDATE publish_attempts SET status='succeeded',result_detail=?,completed_at=? WHERE id=? AND status='publishing'").bind(detail, publishedAt, attemptId),
+        ]);
+        await audit(user.id, claim.auth_method === "browser" ? "通过知乎浏览器发布专栏" : "通过知乎开放平台发布专栏", "claim", claim.id, `${claim.account_name} / 发布人 ${user.name}${payload.url ? ` / ${payload.url}` : ""}`);
+        return Response.json({ ok: true, published_at: publishedAt, published_url: payload.url || "", detail });
+      }
       const lease = await runtime("acquire", claim.account_id); acquired = true;
       const port = Number(lease.port);
       const login = await checkMcpLogin(port);
@@ -143,10 +166,11 @@ export async function POST(request: Request) {
       await runtime("release", claim.account_id); acquired = false;
       return Response.json({ ok: true, published_at: publishedAt, detail });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "小红书发布失败";
+      const message = error instanceof Error ? error.message : isZhihuArticle ? "知乎发布失败" : "小红书发布失败";
       const completedAt = new Date().toISOString();
       const uncertain = publishDispatched && isUncertainPublishError(message);
-      const safeMessage = uncertain ? `发布结果待核验：${message}。请先到小红书确认是否已发布，不能直接重试。` : message;
+      const platformLabel = isZhihuArticle ? "知乎" : "小红书";
+      const safeMessage = uncertain ? `发布结果待核验：${message}。请先到${platformLabel}确认是否已发布，不能直接重试。` : message;
       await db.batch([
         db.prepare("UPDATE claims SET status=?,publish_error=?,updated_at=? WHERE id=? AND status='publishing'")
           .bind(uncertain ? "publishing" : "failed", safeMessage, completedAt, claim.id),
@@ -155,7 +179,7 @@ export async function POST(request: Request) {
         db.prepare("UPDATE publish_attempts SET status=?,error=?,completed_at=? WHERE id=? AND status='publishing'")
           .bind(uncertain ? "uncertain" : "failed", safeMessage, completedAt, attemptId),
       ]);
-      await audit(user.id, uncertain ? "小红书发布结果待核验" : "小红书发布失败", "claim", claim.id, safeMessage);
+      await audit(user.id, uncertain ? `${platformLabel}发布结果待核验` : `${platformLabel}发布失败`, "claim", claim.id, safeMessage);
       if (acquired) await runtime("discard", claim.account_id).catch(() => undefined);
       return Response.json({ error: safeMessage, uncertain }, { status: uncertain ? 409 : 502 });
     }
