@@ -34,3 +34,8 @@ platform/outputs/
 platform/work/
 platform/backups/
 platform/restore-rollback-*/
+
+# Local agent planning notes (never publish)
+/findings.md
+/progress.md
+/task_plan.md

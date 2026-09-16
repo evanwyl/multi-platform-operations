@@ -1,6 +1,6 @@
 # 第三方软件声明
 
-红薯台包含或调用以下第三方开源组件。安装包必须随附本文件以及对应的完整许可证文本。
+多平台内容运营包含或调用以下第三方开源组件。安装包必须随附本文件以及对应的完整许可证文本。
 
 ## xiaohongshu-mcp
 
@@ -30,7 +30,25 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## JavaScript 依赖
 
-直接运行依赖 Drizzle ORM（Apache-2.0）、React（MIT）、React DOM（MIT）和 Playwright Core（Apache-2.0）。构建及开发工具的许可证由锁文件对应的软件包提供。正式发布流程应生成并随安装包附带完整的软件物料清单（SBOM）与许可证汇总。
+直接运行依赖 Drizzle ORM（Apache-2.0）、React（MIT）、React DOM（MIT）、Playwright Core（Apache-2.0）、marked（MIT）和 sanitize-html（MIT）。构建及开发工具的许可证由锁文件对应的软件包提供。正式发布流程应生成并随安装包附带完整的软件物料清单（SBOM）与许可证汇总。
+
+## doocs/md 排版参考
+
+- 项目：https://github.com/doocs/md
+- 许可证：WTFPL
+- 用途：公众号 Markdown 排版的主题分层、内联样式和预览模式参考；本项目的渲染器为独立实现。
+
+DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+Version 2, December 2004
+
+Copyright (C) 2004 Sam Hocevar <sam@hocevar.net>
+
+Everyone is permitted to copy and distribute verbatim or modified copies of this license document, and changing it is allowed as long as the name is changed.
+
+DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
+
+0. You just DO WHAT THE FUCK YOU WANT TO.
 
 ## Chromium
 

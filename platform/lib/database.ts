@@ -53,6 +53,7 @@ const schemaStatements = [
     creation_error TEXT NOT NULL DEFAULT '', creation_prompt TEXT NOT NULL DEFAULT '',
     version_number INTEGER NOT NULL DEFAULT 0, generated_at TEXT,
     publish_images TEXT NOT NULL DEFAULT '[]', publish_error TEXT NOT NULL DEFAULT '', published_at TEXT, publisher_id TEXT,
+    wechat_theme TEXT NOT NULL DEFAULT 'default', wechat_style TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
     FOREIGN KEY(topic_id) REFERENCES topics(id), FOREIGN KEY(account_id) REFERENCES accounts(id),
     FOREIGN KEY(owner_id) REFERENCES users(id)
@@ -133,6 +134,14 @@ const schemaStatements = [
     processing_status TEXT NOT NULL DEFAULT 'pending', detail_error TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'new', first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS article_research_entries (
+    id TEXT PRIMARY KEY, sample_id TEXT NOT NULL, platform TEXT NOT NULL,
+    matched_keywords TEXT NOT NULL DEFAULT '[]', search_engines TEXT NOT NULL DEFAULT '[]',
+    best_rank INTEGER NOT NULL DEFAULT 999, occurrence_count INTEGER NOT NULL DEFAULT 1,
+    relevance_score INTEGER NOT NULL DEFAULT 0, trend_score INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'new', first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
+    FOREIGN KEY(sample_id) REFERENCES article_research_samples(id), UNIQUE(sample_id, platform)
+  )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)`,
   `CREATE INDEX IF NOT EXISTS idx_topics_status_created ON topics(status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_claims_owner_status ON claims(owner_id, status)`,
@@ -144,6 +153,7 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_trend_samples_status_seen ON trend_samples(status, last_seen_at)`,
   `CREATE INDEX IF NOT EXISTS idx_trend_scans_started ON trend_scans(started_at)`,
   `CREATE INDEX IF NOT EXISTS idx_article_research_status_seen ON article_research_samples(status, last_seen_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_article_research_entries_platform_status ON article_research_entries(platform, status, last_seen_at)`,
 ];
 
 let databaseInitialization: Promise<void> | null = null;
@@ -151,133 +161,339 @@ let databaseInitialization: Promise<void> | null = null;
 async function initializeDatabase() {
   const db = database();
   for (const statement of schemaStatements) await db.prepare(statement).run();
-  const portColumn = await db.prepare("SELECT name FROM pragma_table_info('accounts') WHERE name='mcp_port'").first();
-  if (!portColumn) await db.prepare("ALTER TABLE accounts ADD COLUMN mcp_port INTEGER NOT NULL DEFAULT 18060").run();
-  const demoColumn = await db.prepare("SELECT name FROM pragma_table_info('accounts') WHERE name='is_demo'").first();
-  if (!demoColumn) await db.prepare("ALTER TABLE accounts ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0").run();
-  const userIdColumn = await db.prepare("SELECT name FROM pragma_table_info('accounts') WHERE name='xhs_user_id'").first();
-  if (!userIdColumn) await db.prepare("ALTER TABLE accounts ADD COLUMN xhs_user_id TEXT").run();
-  const nicknameColumn = await db.prepare("SELECT name FROM pragma_table_info('accounts') WHERE name='xhs_nickname'").first();
-  if (!nicknameColumn) await db.prepare("ALTER TABLE accounts ADD COLUMN xhs_nickname TEXT").run();
+  const portColumn = await db
+    .prepare(
+      "SELECT name FROM pragma_table_info('accounts') WHERE name='mcp_port'",
+    )
+    .first();
+  if (!portColumn)
+    await db
+      .prepare(
+        "ALTER TABLE accounts ADD COLUMN mcp_port INTEGER NOT NULL DEFAULT 18060",
+      )
+      .run();
+  const demoColumn = await db
+    .prepare(
+      "SELECT name FROM pragma_table_info('accounts') WHERE name='is_demo'",
+    )
+    .first();
+  if (!demoColumn)
+    await db
+      .prepare(
+        "ALTER TABLE accounts ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0",
+      )
+      .run();
+  const userIdColumn = await db
+    .prepare(
+      "SELECT name FROM pragma_table_info('accounts') WHERE name='xhs_user_id'",
+    )
+    .first();
+  if (!userIdColumn)
+    await db.prepare("ALTER TABLE accounts ADD COLUMN xhs_user_id TEXT").run();
+  const nicknameColumn = await db
+    .prepare(
+      "SELECT name FROM pragma_table_info('accounts') WHERE name='xhs_nickname'",
+    )
+    .first();
+  if (!nicknameColumn)
+    await db.prepare("ALTER TABLE accounts ADD COLUMN xhs_nickname TEXT").run();
   const profileColumns = [
-    ["xhs_red_id", "TEXT"], ["profile_bio", "TEXT"], ["avatar_url", "TEXT"],
-    ["following_count", "TEXT"], ["followers_count", "TEXT"], ["interaction_count", "TEXT"],
-    ["note_count", "INTEGER"], ["profile_synced_at", "TEXT"],
+    ["xhs_red_id", "TEXT"],
+    ["profile_bio", "TEXT"],
+    ["avatar_url", "TEXT"],
+    ["following_count", "TEXT"],
+    ["followers_count", "TEXT"],
+    ["interaction_count", "TEXT"],
+    ["note_count", "INTEGER"],
+    ["profile_synced_at", "TEXT"],
   ] as const;
   for (const [name, type] of profileColumns) {
-    const column = await db.prepare(`SELECT name FROM pragma_table_info('accounts') WHERE name='${name}'`).first();
-    if (!column) await db.prepare(`ALTER TABLE accounts ADD COLUMN ${name} ${type}`).run();
+    const column = await db
+      .prepare(
+        `SELECT name FROM pragma_table_info('accounts') WHERE name='${name}'`,
+      )
+      .first();
+    if (!column)
+      await db.prepare(`ALTER TABLE accounts ADD COLUMN ${name} ${type}`).run();
   }
   const strategyColumns = [
-    ["content_pillars", "TEXT NOT NULL DEFAULT '[]'"], ["strategy_keywords", "TEXT NOT NULL DEFAULT '[]'"], ["excluded_topics", "TEXT NOT NULL DEFAULT '[]'"],
+    ["content_pillars", "TEXT NOT NULL DEFAULT '[]'"],
+    ["strategy_keywords", "TEXT NOT NULL DEFAULT '[]'"],
+    ["excluded_topics", "TEXT NOT NULL DEFAULT '[]'"],
   ] as const;
   for (const [name, type] of strategyColumns) {
-    const column = await db.prepare(`SELECT name FROM pragma_table_info('accounts') WHERE name='${name}'`).first();
-    if (!column) await db.prepare(`ALTER TABLE accounts ADD COLUMN ${name} ${type}`).run();
+    const column = await db
+      .prepare(
+        `SELECT name FROM pragma_table_info('accounts') WHERE name='${name}'`,
+      )
+      .first();
+    if (!column)
+      await db.prepare(`ALTER TABLE accounts ADD COLUMN ${name} ${type}`).run();
   }
   const accountPlatformColumns = [
-    ["platform", "TEXT NOT NULL DEFAULT 'xiaohongshu'"], ["external_user_id", "TEXT"],
-    ["external_display_name", "TEXT"], ["auth_method", "TEXT NOT NULL DEFAULT ''"], ["identity_verified_at", "TEXT"],
+    ["platform", "TEXT NOT NULL DEFAULT 'xiaohongshu'"],
+    ["external_user_id", "TEXT"],
+    ["external_display_name", "TEXT"],
+    ["auth_method", "TEXT NOT NULL DEFAULT ''"],
+    ["identity_verified_at", "TEXT"],
   ] as const;
   for (const [name, type] of accountPlatformColumns) {
-    const column = await db.prepare(`SELECT name FROM pragma_table_info('accounts') WHERE name='${name}'`).first();
-    if (!column) await db.prepare(`ALTER TABLE accounts ADD COLUMN ${name} ${type}`).run();
+    const column = await db
+      .prepare(
+        `SELECT name FROM pragma_table_info('accounts') WHERE name='${name}'`,
+      )
+      .first();
+    if (!column)
+      await db.prepare(`ALTER TABLE accounts ADD COLUMN ${name} ${type}`).run();
   }
   const topicPlatformColumns = [
-    ["platform", "TEXT NOT NULL DEFAULT 'xiaohongshu'"], ["source_type", "TEXT NOT NULL DEFAULT 'manual'"], ["source_external_id", "TEXT"],
+    ["platform", "TEXT NOT NULL DEFAULT 'xiaohongshu'"],
+    ["source_type", "TEXT NOT NULL DEFAULT 'manual'"],
+    ["source_external_id", "TEXT"],
   ] as const;
   for (const [name, type] of topicPlatformColumns) {
-    const column = await db.prepare(`SELECT name FROM pragma_table_info('topics') WHERE name='${name}'`).first();
-    if (!column) await db.prepare(`ALTER TABLE topics ADD COLUMN ${name} ${type}`).run();
+    const column = await db
+      .prepare(
+        `SELECT name FROM pragma_table_info('topics') WHERE name='${name}'`,
+      )
+      .first();
+    if (!column)
+      await db.prepare(`ALTER TABLE topics ADD COLUMN ${name} ${type}`).run();
   }
   const trendSampleColumns = [
-    ["xsec_token", "TEXT NOT NULL DEFAULT ''"], ["detail_text", "TEXT NOT NULL DEFAULT ''"],
-    ["heat_score", "INTEGER NOT NULL DEFAULT 0"], ["published_at", "TEXT"],
-    ["content_summary", "TEXT NOT NULL DEFAULT ''"], ["sample_hooks", "TEXT NOT NULL DEFAULT '[]'"],
-    ["sample_pain_point", "TEXT NOT NULL DEFAULT ''"], ["sample_structure", "TEXT NOT NULL DEFAULT '[]'"],
-    ["matched_keywords", "TEXT NOT NULL DEFAULT '[]'"], ["original_tags", "TEXT NOT NULL DEFAULT '[]'"],
-    ["shared_count", "TEXT NOT NULL DEFAULT ''"], ["raw_heat_score", "REAL NOT NULL DEFAULT 0"],
-    ["title_hook", "TEXT NOT NULL DEFAULT ''"], ["visual_highlight", "TEXT NOT NULL DEFAULT ''"],
-    ["emotion_pain", "TEXT NOT NULL DEFAULT ''"], ["practical_value", "TEXT NOT NULL DEFAULT ''"],
-    ["controversy_point", "TEXT NOT NULL DEFAULT ''"], ["reusable_directions", "TEXT NOT NULL DEFAULT '[]'"],
-    ["account_adaptation", "TEXT NOT NULL DEFAULT ''"], ["selection_status", "TEXT NOT NULL DEFAULT 'candidate'"],
-    ["relevance_score", "INTEGER NOT NULL DEFAULT 0"], ["information_density_score", "INTEGER NOT NULL DEFAULT 0"],
-    ["remix_value_score", "INTEGER NOT NULL DEFAULT 0"], ["selection_reason", "TEXT NOT NULL DEFAULT ''"],
-    ["intent_match_score", "INTEGER NOT NULL DEFAULT 0"], ["account_fit_score", "INTEGER NOT NULL DEFAULT 0"],
-    ["prefilter_score", "INTEGER NOT NULL DEFAULT 0"], ["visible_proof_score", "INTEGER NOT NULL DEFAULT 0"],
-    ["reproducibility_score", "INTEGER NOT NULL DEFAULT 0"], ["final_quality_score", "INTEGER NOT NULL DEFAULT 0"],
+    ["xsec_token", "TEXT NOT NULL DEFAULT ''"],
+    ["detail_text", "TEXT NOT NULL DEFAULT ''"],
+    ["heat_score", "INTEGER NOT NULL DEFAULT 0"],
+    ["published_at", "TEXT"],
+    ["content_summary", "TEXT NOT NULL DEFAULT ''"],
+    ["sample_hooks", "TEXT NOT NULL DEFAULT '[]'"],
+    ["sample_pain_point", "TEXT NOT NULL DEFAULT ''"],
+    ["sample_structure", "TEXT NOT NULL DEFAULT '[]'"],
+    ["matched_keywords", "TEXT NOT NULL DEFAULT '[]'"],
+    ["original_tags", "TEXT NOT NULL DEFAULT '[]'"],
+    ["shared_count", "TEXT NOT NULL DEFAULT ''"],
+    ["raw_heat_score", "REAL NOT NULL DEFAULT 0"],
+    ["title_hook", "TEXT NOT NULL DEFAULT ''"],
+    ["visual_highlight", "TEXT NOT NULL DEFAULT ''"],
+    ["emotion_pain", "TEXT NOT NULL DEFAULT ''"],
+    ["practical_value", "TEXT NOT NULL DEFAULT ''"],
+    ["controversy_point", "TEXT NOT NULL DEFAULT ''"],
+    ["reusable_directions", "TEXT NOT NULL DEFAULT '[]'"],
+    ["account_adaptation", "TEXT NOT NULL DEFAULT ''"],
+    ["selection_status", "TEXT NOT NULL DEFAULT 'candidate'"],
+    ["relevance_score", "INTEGER NOT NULL DEFAULT 0"],
+    ["information_density_score", "INTEGER NOT NULL DEFAULT 0"],
+    ["remix_value_score", "INTEGER NOT NULL DEFAULT 0"],
+    ["selection_reason", "TEXT NOT NULL DEFAULT ''"],
+    ["intent_match_score", "INTEGER NOT NULL DEFAULT 0"],
+    ["account_fit_score", "INTEGER NOT NULL DEFAULT 0"],
+    ["prefilter_score", "INTEGER NOT NULL DEFAULT 0"],
+    ["visible_proof_score", "INTEGER NOT NULL DEFAULT 0"],
+    ["reproducibility_score", "INTEGER NOT NULL DEFAULT 0"],
+    ["final_quality_score", "INTEGER NOT NULL DEFAULT 0"],
     ["quality_tier", "TEXT NOT NULL DEFAULT 'unrated'"],
-    ["processing_status", "TEXT NOT NULL DEFAULT 'pending'"], ["capture_outcome", "TEXT NOT NULL DEFAULT 'new'"],
+    ["processing_status", "TEXT NOT NULL DEFAULT 'pending'"],
+    ["capture_outcome", "TEXT NOT NULL DEFAULT 'new'"],
     ["detail_error", "TEXT NOT NULL DEFAULT ''"],
   ] as const;
   for (const [name, type] of trendSampleColumns) {
-    const column = await db.prepare(`SELECT name FROM pragma_table_info('trend_samples') WHERE name='${name}'`).first();
-    if (!column) await db.prepare(`ALTER TABLE trend_samples ADD COLUMN ${name} ${type}`).run();
+    const column = await db
+      .prepare(
+        `SELECT name FROM pragma_table_info('trend_samples') WHERE name='${name}'`,
+      )
+      .first();
+    if (!column)
+      await db
+        .prepare(`ALTER TABLE trend_samples ADD COLUMN ${name} ${type}`)
+        .run();
   }
-  const legacyTrendSamples = await db.prepare("SELECT id,keyword,detail_text,content_summary,heat_score FROM trend_samples WHERE matched_keywords='[]'").all();
+  const legacyTrendSamples = await db
+    .prepare(
+      "SELECT id,keyword,detail_text,content_summary,heat_score FROM trend_samples WHERE matched_keywords='[]'",
+    )
+    .all();
   for (const sample of legacyTrendSamples.results) {
-    const hasResearchData = Boolean(sample.detail_text || sample.content_summary || Number(sample.heat_score) > 0);
-    await db.prepare("UPDATE trend_samples SET matched_keywords=?,selection_status=?,processing_status=? WHERE id=?")
-      .bind(JSON.stringify(sample.keyword ? [String(sample.keyword)] : []), hasResearchData ? "selected" : "candidate", sample.detail_text ? "success" : "pending", sample.id).run();
+    const hasResearchData = Boolean(
+      sample.detail_text ||
+      sample.content_summary ||
+      Number(sample.heat_score) > 0,
+    );
+    await db
+      .prepare(
+        "UPDATE trend_samples SET matched_keywords=?,selection_status=?,processing_status=? WHERE id=?",
+      )
+      .bind(
+        JSON.stringify(sample.keyword ? [String(sample.keyword)] : []),
+        hasResearchData ? "selected" : "candidate",
+        sample.detail_text ? "success" : "pending",
+        sample.id,
+      )
+      .run();
   }
-  const trendSettingsColumns = [["content_type", "TEXT NOT NULL DEFAULT 'image'"], ["target_account_id", "TEXT"]] as const;
+  const trendSettingsColumns = [
+    ["content_type", "TEXT NOT NULL DEFAULT 'image'"],
+    ["target_account_id", "TEXT"],
+  ] as const;
   for (const [name, type] of trendSettingsColumns) {
-    const column = await db.prepare(`SELECT name FROM pragma_table_info('trend_settings') WHERE name='${name}'`).first();
-    if (!column) await db.prepare(`ALTER TABLE trend_settings ADD COLUMN ${name} ${type}`).run();
+    const column = await db
+      .prepare(
+        `SELECT name FROM pragma_table_info('trend_settings') WHERE name='${name}'`,
+      )
+      .first();
+    if (!column)
+      await db
+        .prepare(`ALTER TABLE trend_settings ADD COLUMN ${name} ${type}`)
+        .run();
   }
-  const trendScanColumns = [["request_text", "TEXT NOT NULL DEFAULT ''"], ["theme", "TEXT NOT NULL DEFAULT ''"], ["analysis_overview", "TEXT NOT NULL DEFAULT ''"], ["content_type", "TEXT NOT NULL DEFAULT 'image'"], ["target_account_id", "TEXT"], ["keyword_plan", "TEXT NOT NULL DEFAULT '{}' "]] as const;
+  const trendScanColumns = [
+    ["request_text", "TEXT NOT NULL DEFAULT ''"],
+    ["theme", "TEXT NOT NULL DEFAULT ''"],
+    ["analysis_overview", "TEXT NOT NULL DEFAULT ''"],
+    ["content_type", "TEXT NOT NULL DEFAULT 'image'"],
+    ["target_account_id", "TEXT"],
+    ["keyword_plan", "TEXT NOT NULL DEFAULT '{}' "],
+  ] as const;
   for (const [name, type] of trendScanColumns) {
-    const column = await db.prepare(`SELECT name FROM pragma_table_info('trend_scans') WHERE name='${name}'`).first();
-    if (!column) await db.prepare(`ALTER TABLE trend_scans ADD COLUMN ${name} ${type}`).run();
+    const column = await db
+      .prepare(
+        `SELECT name FROM pragma_table_info('trend_scans') WHERE name='${name}'`,
+      )
+      .first();
+    if (!column)
+      await db
+        .prepare(`ALTER TABLE trend_scans ADD COLUMN ${name} ${type}`)
+        .run();
   }
   const claimCreativeColumns = [
-    ["creative_json", "TEXT NOT NULL DEFAULT '{}'"], ["creation_status", "TEXT NOT NULL DEFAULT 'idle'"],
-    ["creation_error", "TEXT NOT NULL DEFAULT ''"], ["creation_prompt", "TEXT NOT NULL DEFAULT ''"],
-    ["version_number", "INTEGER NOT NULL DEFAULT 0"], ["generated_at", "TEXT"],
+    ["creative_json", "TEXT NOT NULL DEFAULT '{}'"],
+    ["creation_status", "TEXT NOT NULL DEFAULT 'idle'"],
+    ["creation_error", "TEXT NOT NULL DEFAULT ''"],
+    ["creation_prompt", "TEXT NOT NULL DEFAULT ''"],
+    ["version_number", "INTEGER NOT NULL DEFAULT 0"],
+    ["generated_at", "TEXT"],
   ] as const;
   for (const [name, type] of claimCreativeColumns) {
-    const column = await db.prepare(`SELECT name FROM pragma_table_info('claims') WHERE name='${name}'`).first();
-    if (!column) await db.prepare(`ALTER TABLE claims ADD COLUMN ${name} ${type}`).run();
+    const column = await db
+      .prepare(
+        `SELECT name FROM pragma_table_info('claims') WHERE name='${name}'`,
+      )
+      .first();
+    if (!column)
+      await db.prepare(`ALTER TABLE claims ADD COLUMN ${name} ${type}`).run();
   }
   const claimPublishColumns = [
-    ["publish_images", "TEXT NOT NULL DEFAULT '[]'"], ["publish_error", "TEXT NOT NULL DEFAULT ''"], ["published_at", "TEXT"], ["publisher_id", "TEXT"],
+    ["publish_images", "TEXT NOT NULL DEFAULT '[]'"],
+    ["publish_error", "TEXT NOT NULL DEFAULT ''"],
+    ["published_at", "TEXT"],
+    ["publisher_id", "TEXT"],
   ] as const;
   for (const [name, type] of claimPublishColumns) {
-    const column = await db.prepare(`SELECT name FROM pragma_table_info('claims') WHERE name='${name}'`).first();
-    if (!column) await db.prepare(`ALTER TABLE claims ADD COLUMN ${name} ${type}`).run();
+    const column = await db
+      .prepare(
+        `SELECT name FROM pragma_table_info('claims') WHERE name='${name}'`,
+      )
+      .first();
+    if (!column)
+      await db.prepare(`ALTER TABLE claims ADD COLUMN ${name} ${type}`).run();
   }
   const claimPlatformColumns = [
-    ["content_type", "TEXT NOT NULL DEFAULT 'xiaohongshu_note'"], ["external_content_id", "TEXT"], ["published_url", "TEXT"],
+    ["content_type", "TEXT NOT NULL DEFAULT 'xiaohongshu_note'"],
+    ["external_content_id", "TEXT"],
+    ["published_url", "TEXT"],
+    ["wechat_theme", "TEXT NOT NULL DEFAULT 'default'"],
+    ["wechat_style", "TEXT NOT NULL DEFAULT '{}'"],
   ] as const;
   for (const [name, type] of claimPlatformColumns) {
-    const column = await db.prepare(`SELECT name FROM pragma_table_info('claims') WHERE name='${name}'`).first();
-    if (!column) await db.prepare(`ALTER TABLE claims ADD COLUMN ${name} ${type}`).run();
+    const column = await db
+      .prepare(
+        `SELECT name FROM pragma_table_info('claims') WHERE name='${name}'`,
+      )
+      .first();
+    if (!column)
+      await db.prepare(`ALTER TABLE claims ADD COLUMN ${name} ${type}`).run();
   }
-  await db.prepare("UPDATE accounts SET platform='xiaohongshu' WHERE platform IS NULL OR platform='' ").run();
-  await db.prepare("UPDATE topics SET platform='xiaohongshu',source_type=CASE WHEN source_url!='' THEN 'xhs_trend' ELSE 'manual' END WHERE platform IS NULL OR platform='' ").run();
-  await db.prepare("UPDATE claims SET content_type='xiaohongshu_note' WHERE content_type IS NULL OR content_type='' ").run();
-  await db.prepare(`UPDATE claims SET publisher_id=(SELECT actor_id FROM audit_logs
+  await db
+    .prepare(
+      "UPDATE accounts SET platform='xiaohongshu' WHERE platform IS NULL OR platform='' ",
+    )
+    .run();
+  await db
+    .prepare(
+      "UPDATE topics SET platform='xiaohongshu',source_type=CASE WHEN source_url!='' THEN 'xhs_trend' ELSE 'manual' END WHERE platform IS NULL OR platform='' ",
+    )
+    .run();
+  await db
+    .prepare(
+      "UPDATE claims SET content_type='xiaohongshu_note' WHERE content_type IS NULL OR content_type='' ",
+    )
+    .run();
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO article_research_entries
+    (id,sample_id,platform,matched_keywords,search_engines,best_rank,occurrence_count,relevance_score,trend_score,status,first_seen_at,last_seen_at)
+    SELECT 'zhihu:' || id,id,'zhihu',matched_keywords,search_engines,best_rank,occurrence_count,relevance_score,trend_score,status,first_seen_at,last_seen_at
+    FROM article_research_samples`,
+    )
+    .run();
+  await db
+    .prepare(
+      `UPDATE claims SET publisher_id=(SELECT actor_id FROM audit_logs
     WHERE object_type='claim' AND object_id=claims.id AND action='通过小红书MCP发布内容'
-    ORDER BY created_at DESC LIMIT 1) WHERE publisher_id IS NULL AND status='published'`).run();
-  await db.prepare("UPDATE accounts SET is_demo=1 WHERE id IN ('acc-work','acc-home','acc-beauty','acc-city','acc-food')").run();
-  await db.prepare("UPDATE accounts SET status='login_expired' WHERE is_demo=0 AND xhs_user_id IS NULL AND status='online'").run();
+    ORDER BY created_at DESC LIMIT 1) WHERE publisher_id IS NULL AND status='published'`,
+    )
+    .run();
+  await db
+    .prepare(
+      "UPDATE accounts SET is_demo=1 WHERE id IN ('acc-work','acc-home','acc-beauty','acc-city','acc-food')",
+    )
+    .run();
+  await db
+    .prepare(
+      "UPDATE accounts SET status='login_expired' WHERE is_demo=0 AND xhs_user_id IS NULL AND status='online'",
+    )
+    .run();
   await db.prepare("DROP INDEX IF EXISTS idx_accounts_mcp_port_real").run();
-  await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_xhs_user_id ON accounts(xhs_user_id) WHERE xhs_user_id IS NOT NULL").run();
-  await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_platform_external_user ON accounts(platform,external_user_id) WHERE external_user_id IS NOT NULL").run();
-  await db.prepare(`UPDATE claims SET status='archived',updated_at=? WHERE id IN (
+  await db
+    .prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_xhs_user_id ON accounts(xhs_user_id) WHERE xhs_user_id IS NOT NULL",
+    )
+    .run();
+  await db
+    .prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_platform_external_user ON accounts(platform,external_user_id) WHERE external_user_id IS NOT NULL",
+    )
+    .run();
+  await db
+    .prepare(
+      `UPDATE claims SET status='archived',updated_at=? WHERE id IN (
     SELECT id FROM (
       SELECT id,ROW_NUMBER() OVER (
         PARTITION BY topic_id,account_id ORDER BY updated_at DESC,created_at ASC,id ASC
       ) AS duplicate_rank
       FROM claims WHERE status NOT IN ('published','archived')
     ) WHERE duplicate_rank>1
-  )`).bind(new Date().toISOString()).run();
-  await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_active_topic_account
-    ON claims(topic_id,account_id) WHERE status NOT IN ('published','archived')`).run();
-  await db.prepare("INSERT OR IGNORE INTO trend_settings (id,keywords,exclude_keywords,publish_time,sort_by,updated_at) VALUES ('default','[]','[]','一周内','最多点赞',?)")
-    .bind(new Date().toISOString()).run();
-  await db.prepare(`UPDATE trend_settings SET account_id=(SELECT id FROM accounts WHERE is_demo=0 LIMIT 1)
-    WHERE id='default' AND account_id IS NULL AND (SELECT COUNT(*) FROM accounts WHERE is_demo=0)=1`).run();
+  )`,
+    )
+    .bind(new Date().toISOString())
+    .run();
+  await db
+    .prepare(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_active_topic_account
+    ON claims(topic_id,account_id) WHERE status NOT IN ('published','archived')`,
+    )
+    .run();
+  await db
+    .prepare(
+      "INSERT OR IGNORE INTO trend_settings (id,keywords,exclude_keywords,publish_time,sort_by,updated_at) VALUES ('default','[]','[]','一周内','最多点赞',?)",
+    )
+    .bind(new Date().toISOString())
+    .run();
+  await db
+    .prepare(
+      `UPDATE trend_settings SET account_id=(SELECT id FROM accounts WHERE is_demo=0 LIMIT 1)
+    WHERE id='default' AND account_id IS NULL AND (SELECT COUNT(*) FROM accounts WHERE is_demo=0)=1`,
+    )
+    .run();
   await db.prepare("PRAGMA optimize").run();
 }
 
@@ -291,7 +507,25 @@ export async function ensureDatabase() {
   return databaseInitialization;
 }
 
-export async function audit(actorId: string, action: string, objectType: string, objectId: string, detail = "") {
-  await database().prepare("INSERT INTO audit_logs (id,actor_id,action,object_type,object_id,detail,created_at) VALUES (?,?,?,?,?,?,?)")
-    .bind(crypto.randomUUID(), actorId, action, objectType, objectId, detail, new Date().toISOString()).run();
+export async function audit(
+  actorId: string,
+  action: string,
+  objectType: string,
+  objectId: string,
+  detail = "",
+) {
+  await database()
+    .prepare(
+      "INSERT INTO audit_logs (id,actor_id,action,object_type,object_id,detail,created_at) VALUES (?,?,?,?,?,?,?)",
+    )
+    .bind(
+      crypto.randomUUID(),
+      actorId,
+      action,
+      objectType,
+      objectId,
+      detail,
+      new Date().toISOString(),
+    )
+    .run();
 }

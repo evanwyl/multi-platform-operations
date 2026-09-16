@@ -52,7 +52,7 @@
   if ([defaults integerForKey:@"LocalNetworkPrimerVersion"] >= 1) return;
   NSAlert *alert = [[NSAlert alloc] init];
   alert.messageText = @"需要访问本地网络";
-  alert.informativeText = @"红薯台需要连接同一局域网内的团队主机。接下来如果 macOS 询问是否允许访问本地网络，请选择“允许”。成员模式不会启动本机数据库或小红书 MCP。";
+  alert.informativeText = @"多平台内容运营需要连接同一局域网内的团队主机。接下来如果 macOS 询问是否允许访问本地网络，请选择“允许”。成员模式不会启动本机数据库或小红书 MCP。";
   [alert addButtonWithTitle:@"继续"];
   [alert runModal];
   [defaults setInteger:1 forKey:@"LocalNetworkPrimerVersion"];
@@ -122,7 +122,7 @@
 
 - (BOOL)runFirstLaunchSetup {
   NSAlert *welcome = [[NSAlert alloc] init];
-  welcome.messageText = @"欢迎使用红薯台";
+  welcome.messageText = @"欢迎使用多平台内容运营";
   welcome.informativeText = @"请先选择这台 Mac 的使用方式。作出选择前不会启动任何本地后台服务。";
   [welcome addButtonWithTitle:@"独立使用"];
   [welcome addButtonWithTitle:@"创建团队主机"];
@@ -170,8 +170,8 @@
   NSMenuItem *applicationItem = [[NSMenuItem alloc] init];
   [menuBar addItem:applicationItem];
 
-  NSMenu *applicationMenu = [[NSMenu alloc] initWithTitle:@"红薯台"];
-  [applicationMenu addItemWithTitle:@"关于红薯台" action:@selector(orderFrontStandardAboutPanel:) keyEquivalent:@""];
+  NSMenu *applicationMenu = [[NSMenu alloc] initWithTitle:@"多平台内容运营"];
+  [applicationMenu addItemWithTitle:@"关于多平台内容运营" action:@selector(orderFrontStandardAboutPanel:) keyEquivalent:@""];
   [applicationMenu addItem:[NSMenuItem separatorItem]];
   NSMenuItem *teamItem = [[NSMenuItem alloc] initWithTitle:@"局域网团队设置…" action:@selector(configureTeamMode:) keyEquivalent:@","];
   teamItem.target = self;
@@ -180,7 +180,7 @@
   privacyItem.target = self;
   [applicationMenu addItem:privacyItem];
   [applicationMenu addItem:[NSMenuItem separatorItem]];
-  NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:@"退出红薯台" action:@selector(quitApplication:) keyEquivalent:@"q"];
+  NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:@"退出多平台内容运营" action:@selector(quitApplication:) keyEquivalent:@"q"];
   quitItem.target = self;
   [applicationMenu addItem:quitItem];
   applicationItem.submenu = applicationMenu;
@@ -205,7 +205,7 @@
                                             styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
                                               backing:NSBackingStoreBuffered
                                                 defer:NO];
-  self.window.title = @"红薯台";
+  self.window.title = @"多平台内容运营";
   self.window.minSize = NSMakeSize(960, 640);
   self.window.releasedWhenClosed = NO;
   [self.window center];
@@ -222,10 +222,10 @@
 }
 
 - (void)showLoadingPage {
-  NSString *title = @"红薯台正在启动";
+  NSString *title = @"多平台内容运营正在启动";
   NSString *hint = @"正在准备本地服务，请稍候…";
   if ([self.teamMode isEqualToString:@"unconfigured"]) {
-    title = @"欢迎使用红薯台";
+    title = @"欢迎使用多平台内容运营";
     hint = @"请选择这台 Mac 的使用方式";
   } else if ([self.teamMode isEqualToString:@"member"]) {
     title = @"正在连接团队主机";
@@ -234,22 +234,24 @@
     title = @"团队主机正在启动";
     hint = @"正在准备共享工作区，请稍候…";
   }
-  NSString *loadingPage = [NSString stringWithFormat:@"<!doctype html><meta charset='utf-8'><style>body{margin:0;display:grid;place-items:center;height:100vh;background:#fffaf7;color:#6d3525;font:16px -apple-system,BlinkMacSystemFont,sans-serif}.box{text-align:center}.icon{font-size:48px;margin-bottom:14px}.hint{color:#9a6b5a;margin-top:8px}</style><div class='box'><div class='icon'>🍠</div><strong>%@</strong><div class='hint'>%@</div></div>", title, hint];
+  NSString *loadingPage = [NSString stringWithFormat:@"<!doctype html><meta charset='utf-8'><style>body{margin:0;display:grid;place-items:center;height:100vh;background:#f7f9fc;color:#172033;font:16px -apple-system,BlinkMacSystemFont,sans-serif}.box{text-align:center}.icon{display:grid;grid-template-columns:repeat(2,18px);gap:4px;width:max-content;margin:0 auto 18px}.icon i{width:18px;height:18px;border-radius:5px;background:#2e9eff}.icon i:nth-child(2),.icon i:nth-child(3){background:#0c79d8}.icon i:nth-child(4){background:#68c4ff}.hint{color:#64748b;margin-top:8px}</style><div class='box'><div class='icon' aria-hidden='true'><i></i><i></i><i></i><i></i></div><strong>%@</strong><div class='hint'>%@</div></div>", title, hint];
   [self.webView loadHTMLString:loadingPage baseURL:nil];
 }
 
 - (void)configureMenu {
   self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
-  self.statusItem.button.title = @"🍠";
-  self.statusItem.button.toolTip = @"红薯台";
+  NSImage *statusIcon = NSApp.applicationIconImage;
+  statusIcon.size = NSMakeSize(18, 18);
+  self.statusItem.button.image = statusIcon;
+  self.statusItem.button.toolTip = @"多平台内容运营";
 
   NSMenu *menu = [[NSMenu alloc] init];
-  NSMenuItem *status = [[NSMenuItem alloc] initWithTitle:@"红薯台正在启动…" action:nil keyEquivalent:@""];
+  NSMenuItem *status = [[NSMenuItem alloc] initWithTitle:@"多平台内容运营正在启动…" action:nil keyEquivalent:@""];
   status.tag = 100;
   [menu addItem:status];
   [menu addItem:[NSMenuItem separatorItem]];
 
-  NSMenuItem *openItem = [[NSMenuItem alloc] initWithTitle:@"打开红薯台" action:@selector(openPlatform:) keyEquivalent:@"o"];
+  NSMenuItem *openItem = [[NSMenuItem alloc] initWithTitle:@"打开多平台内容运营" action:@selector(openPlatform:) keyEquivalent:@"o"];
   openItem.target = self;
   [menu addItem:openItem];
   NSMenuItem *dataItem = [[NSMenuItem alloc] initWithTitle:@"打开数据文件夹" action:@selector(openDataFolder:) keyEquivalent:@""];
@@ -262,7 +264,7 @@
   privacyItem.target = self;
   [menu addItem:privacyItem];
   [menu addItem:[NSMenuItem separatorItem]];
-  NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:@"退出红薯台" action:@selector(quitApplication:) keyEquivalent:@"q"];
+  NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:@"退出多平台内容运营" action:@selector(quitApplication:) keyEquivalent:@"q"];
   quitItem.target = self;
   [menu addItem:quitItem];
   self.statusItem.menu = menu;
@@ -313,12 +315,12 @@
     dispatch_async(dispatch_get_main_queue(), ^{
       AppDelegate *strongSelf = weakSelf;
       if (!strongSelf || strongSelf.quitting) return;
-      [strongSelf setStatusText:@"红薯台已停止"];
-      [strongSelf showFatal:[NSString stringWithFormat:@"红薯台服务意外停止（退出码 %d）。\n\n日志位置：%@", endedTask.terminationStatus, logURL.path]];
+      [strongSelf setStatusText:@"多平台内容运营已停止"];
+      [strongSelf showFatal:[NSString stringWithFormat:@"多平台内容运营服务意外停止（退出码 %d）。\n\n日志位置：%@", endedTask.terminationStatus, logURL.path]];
     });
   };
   if (![task launchAndReturnError:&error]) {
-    [self showFatal:[NSString stringWithFormat:@"红薯台无法启动：%@", error.localizedDescription]];
+    [self showFatal:[NSString stringWithFormat:@"多平台内容运营无法启动：%@", error.localizedDescription]];
     return;
   }
   self.service = task;
@@ -348,7 +350,7 @@
       [self setStatusText:likelyDenied ? @"本地网络权限可能未开启" : @"无法连接团队主机"];
       [self showMemberConnectionFailureLikelyDenied:likelyDenied];
     } else {
-      [self setStatusText:@"红薯台启动失败"];
+      [self setStatusText:@"多平台内容运营启动失败"];
       [self showFatal:@"等待本地服务启动超时。请从菜单打开数据文件夹，并查看 logs/application.log。"];
     }
     return;
@@ -381,7 +383,7 @@
       strongSelf.ready = YES;
       strongSelf.lastProbeError = nil;
       [strongSelf.readyTimer invalidate];
-      NSString *status = [strongSelf.teamMode isEqualToString:@"host"] ? @"团队主机运行中" : [strongSelf.teamMode isEqualToString:@"member"] ? @"已连接团队主机" : @"红薯台运行中";
+      NSString *status = [strongSelf.teamMode isEqualToString:@"host"] ? @"团队主机运行中" : [strongSelf.teamMode isEqualToString:@"member"] ? @"已连接团队主机" : @"多平台内容运营运行中";
       [strongSelf setStatusText:status];
       [strongSelf openPlatform:nil];
     });
@@ -393,7 +395,7 @@
   NSAlert *alert = [[NSAlert alloc] init];
   alert.alertStyle = NSAlertStyleCritical;
   alert.messageText = likelyDenied ? @"可能未允许访问本地网络" : @"无法连接团队主机";
-  alert.informativeText = [NSString stringWithFormat:@"目标主机：%@\n\n请确认“系统设置 → 隐私与安全性 → 本地网络”已允许红薯台，并确认主机保持运行、两台电脑可以互访。", self.platformURL.absoluteString];
+  alert.informativeText = [NSString stringWithFormat:@"目标主机：%@\n\n请确认“系统设置 → 隐私与安全性 → 本地网络”已允许多平台内容运营，并确认主机保持运行、两台电脑可以互访。", self.platformURL.absoluteString];
   [alert addButtonWithTitle:@"打开本地网络设置"];
   [alert addButtonWithTitle:@"知道了"];
   if ([alert runModal] == NSAlertFirstButtonReturn) [self openLocalNetworkSettings:nil];
@@ -509,7 +511,7 @@
 - (void)configureTeamMode:(id)sender {
   NSAlert *alert = [[NSAlert alloc] init];
   alert.messageText = @"局域网团队设置";
-  alert.informativeText = @"单机：数据只在本机。主机：团队共用本机数据。成员：连接主机，不启动本地服务。保存后需退出并重新打开红薯台。";
+  alert.informativeText = @"单机：数据只在本机。主机：团队共用本机数据。成员：连接主机，不启动本地服务。保存后需退出并重新打开多平台内容运营。";
   [alert addButtonWithTitle:@"保存"];
   [alert addButtonWithTitle:@"取消"];
   NSView *form = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 420, 174)];
@@ -556,8 +558,8 @@
     return;
   }
   NSString *detail = [newMode isEqualToString:@"host"]
-    ? [NSString stringWithFormat:@"团队主机已配置。请把连接码发给可信成员：\n\n%@\n\n请完全退出并重新打开红薯台。", newToken]
-    : @"设置已保存。请完全退出并重新打开红薯台。";
+    ? [NSString stringWithFormat:@"团队主机已配置。请把连接码发给可信成员：\n\n%@\n\n请完全退出并重新打开多平台内容运营。", newToken]
+    : @"设置已保存。请完全退出并重新打开多平台内容运营。";
   NSAlert *saved = [[NSAlert alloc] init]; saved.messageText = @"设置已保存"; saved.informativeText = detail; [saved runModal];
 }
 
@@ -606,7 +608,7 @@
     initiatedByFrame:(WKFrameInfo *)frame
     completionHandler:(void (^)(void))completionHandler {
   NSAlert *alert = [[NSAlert alloc] init];
-  alert.messageText = @"红薯台";
+  alert.messageText = @"多平台内容运营";
   alert.informativeText = message ?: @"";
   [alert addButtonWithTitle:@"知道了"];
   [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
@@ -654,7 +656,7 @@
 
 - (void)quitApplication:(id)sender {
   self.quitting = YES;
-  [self setStatusText:@"红薯台正在退出…"];
+  [self setStatusText:@"多平台内容运营正在退出…"];
   [self stopService];
   [NSApp terminate:nil];
 }
@@ -674,7 +676,7 @@
   [NSApp activateIgnoringOtherApps:YES];
   NSAlert *alert = [[NSAlert alloc] init];
   alert.alertStyle = NSAlertStyleCritical;
-  alert.messageText = @"红薯台";
+  alert.messageText = @"多平台内容运营";
   alert.informativeText = message;
   [alert addButtonWithTitle:@"知道了"];
   [alert runModal];

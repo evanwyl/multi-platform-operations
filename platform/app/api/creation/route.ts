@@ -1,5 +1,10 @@
 import { currentUser, rejectCrossSiteMutation } from "../../../lib/auth";
-import { audit, database, ensureDatabase, type DbUser } from "../../../lib/database";
+import {
+  audit,
+  database,
+  ensureDatabase,
+  type DbUser,
+} from "../../../lib/database";
 import { can, forbidden, roleGroups } from "../../../lib/permissions";
 import { managerFetch } from "../../../lib/runtime-client";
 
@@ -15,87 +20,197 @@ type CreativeDraft = {
 };
 
 type ClaimContext = {
-  id: string; owner_id: string; status: string; title: string; body: string; tags: string;
-  creative_json: string; version_number: number; review_comment: string; angle: string;
-  topic_title: string; account_name: string; persona: string; audience: string;
-  brief: string; target_audience: string; pain_point: string; hook_points: string;
-  content_structure: string; why_it_works: string; account_fit: string;
-  source_feed_ids: string; account_platform: string; content_type: string;
+  id: string;
+  owner_id: string;
+  status: string;
+  title: string;
+  body: string;
+  tags: string;
+  creative_json: string;
+  version_number: number;
+  review_comment: string;
+  angle: string;
+  topic_title: string;
+  account_name: string;
+  persona: string;
+  audience: string;
+  brief: string;
+  target_audience: string;
+  pain_point: string;
+  hook_points: string;
+  content_structure: string;
+  why_it_works: string;
+  account_fit: string;
+  source_feed_ids: string;
+  account_platform: string;
+  content_type: string;
 };
 
 type SourceReference = {
-  feed_id: string; title: string; author_name: string; source_url: string; detail_text: string;
+  feed_id: string;
+  title: string;
+  author_name: string;
+  source_url: string;
+  detail_text: string;
 };
 
 async function requireUser(request: Request) {
   const user = await currentUser(request);
-  if (!user) throw new Response(JSON.stringify({ error: "请先登录" }), { status: 401, headers: { "content-type": "application/json" } });
+  if (!user)
+    throw new Response(JSON.stringify({ error: "请先登录" }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    });
   return user;
 }
 
 function parseJson<T>(value: string, fallback: T): T {
-  try { return JSON.parse(value) as T; } catch { return fallback; }
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
 }
 
 function textList(value: unknown, max: number) {
-  const source = Array.isArray(value) ? value : String(value ?? "").split(/[，,\s]+/);
-  return [...new Set(source.map((item) => String(item).replace(/^#/, "").trim()).filter(Boolean))].slice(0, max);
+  const source = Array.isArray(value)
+    ? value
+    : String(value ?? "").split(/[，,\s]+/);
+  return [
+    ...new Set(
+      source
+        .map((item) => String(item).replace(/^#/, "").trim())
+        .filter(Boolean),
+    ),
+  ].slice(0, max);
 }
 
 function normalizeImagePrompt(value: unknown, index: number): ImagePrompt {
-  const item = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  const item = (value && typeof value === "object" ? value : {}) as Record<
+    string,
+    unknown
+  >;
   return {
-    label: String(item.label ?? `配图 ${index + 1}`).trim().slice(0, 20),
-    prompt: String(item.prompt ?? item.image_prompt ?? item.visual_hint ?? "").trim().slice(0, 1200),
+    label: String(item.label ?? `配图 ${index + 1}`)
+      .trim()
+      .slice(0, 20),
+    prompt: String(item.prompt ?? item.image_prompt ?? item.visual_hint ?? "")
+      .trim()
+      .slice(0, 1200),
   };
 }
 
-function normalizeCreative(value: unknown, contentType = "xiaohongshu_note"): CreativeDraft {
-  const draft = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
-  const longArticle = contentType === "zhihu_article" || contentType === "zhihu_answer" || contentType === "wechat_article";
-  const directPrompts = (Array.isArray(draft.image_prompts) ? draft.image_prompts : []).slice(0, longArticle ? 8 : 6).map(normalizeImagePrompt).filter((item) => item.prompt);
+function normalizeCreative(
+  value: unknown,
+  contentType = "xiaohongshu_note",
+): CreativeDraft {
+  const draft = (value && typeof value === "object" ? value : {}) as Record<
+    string,
+    unknown
+  >;
+  const longArticle =
+    contentType === "zhihu_article" ||
+    contentType === "zhihu_answer" ||
+    contentType === "wechat_article";
+  const directPrompts = (
+    Array.isArray(draft.image_prompts) ? draft.image_prompts : []
+  )
+    .slice(0, longArticle ? 8 : 6)
+    .map(normalizeImagePrompt)
+    .filter((item) => item.prompt);
   return {
-    title_options: textList(draft.title_options, 6).map((item) => item.slice(0, longArticle ? 100 : 20)),
-    title: String(draft.title ?? "").trim().slice(0, longArticle ? 100 : 20),
-    body: String(draft.body ?? "").trim().slice(0, longArticle ? 20000 : 1200),
-    tags: textList(draft.tags, 10).map((item) => item.slice(0, longArticle ? 32 : 16)),
+    title_options: textList(draft.title_options, 6).map((item) =>
+      item.slice(0, longArticle ? 100 : 20),
+    ),
+    title: String(draft.title ?? "")
+      .trim()
+      .slice(0, longArticle ? 100 : 20),
+    body: String(draft.body ?? "")
+      .trim()
+      .slice(0, longArticle ? 20000 : 1200),
+    tags: textList(draft.tags, 10).map((item) =>
+      item.slice(0, longArticle ? 32 : 16),
+    ),
     image_prompts: directPrompts,
-    creative_note: String(draft.creative_note ?? "").trim().slice(0, 300),
+    creative_note: String(draft.creative_note ?? "")
+      .trim()
+      .slice(0, 300),
   };
 }
 
 function enforceCoverTitle(draft: CreativeDraft): CreativeDraft {
   if (!draft.image_prompts.length || !draft.title) return draft;
-  const coverIndex = draft.image_prompts.findIndex((item) => /封面|主视觉/.test(item.label));
+  const coverIndex = draft.image_prompts.findIndex((item) =>
+    /封面|主视觉/.test(item.label),
+  );
   const index = coverIndex >= 0 ? coverIndex : 0;
   const cover = { ...draft.image_prompts[index], label: "封面主视觉" };
   const titleInstruction = `标题文字：画面必须逐字、清晰呈现“${draft.title}”，作为最高视觉层级；标题位于画面上方或视觉焦点附近，使用醒目的高对比中文字体，字号约占画面高度12%至18%，字距舒展，避免遮挡主体，确保手机缩略图中仍可辨认；不得改字、漏字、使用占位符或生成乱码。`;
-  const basePrompt = cover.prompt.replace(/\n?标题文字：画面必须逐字、清晰呈现[\s\S]*$/, "").trim();
-  cover.prompt = `${basePrompt.slice(0, Math.max(0, 1180 - titleInstruction.length)).trim()}\n${titleInstruction}`.trim();
-  return { ...draft, image_prompts: [cover, ...draft.image_prompts.filter((_, itemIndex) => itemIndex !== index)] };
+  const basePrompt = cover.prompt
+    .replace(/\n?标题文字：画面必须逐字、清晰呈现[\s\S]*$/, "")
+    .trim();
+  cover.prompt =
+    `${basePrompt.slice(0, Math.max(0, 1180 - titleInstruction.length)).trim()}\n${titleInstruction}`.trim();
+  return {
+    ...draft,
+    image_prompts: [
+      cover,
+      ...draft.image_prompts.filter((_, itemIndex) => itemIndex !== index),
+    ],
+  };
 }
 
 async function claimContext(id: string) {
-  return database().prepare(`SELECT c.*,t.title AS topic_title,a.name AS account_name,a.platform AS account_platform,a.persona,a.audience,
+  return database()
+    .prepare(
+      `SELECT c.*,t.title AS topic_title,a.name AS account_name,a.platform AS account_platform,a.persona,a.audience,
     COALESCE(i.brief,'') AS brief,COALESCE(i.target_audience,'') AS target_audience,
     COALESCE(i.pain_point,'') AS pain_point,COALESCE(i.hook_points,'[]') AS hook_points,
     COALESCE(i.content_structure,'[]') AS content_structure,COALESCE(i.why_it_works,'') AS why_it_works,
     COALESCE(i.account_fit,'') AS account_fit,COALESCE(i.source_feed_ids,'[]') AS source_feed_ids
     FROM claims c JOIN topics t ON t.id=c.topic_id JOIN accounts a ON a.id=c.account_id
-    LEFT JOIN topic_insights i ON i.topic_id=t.id WHERE c.id=? AND a.is_demo=0`).bind(id).first<ClaimContext>();
+    LEFT JOIN topic_insights i ON i.topic_id=t.id WHERE c.id=? AND a.is_demo=0`,
+    )
+    .bind(id)
+    .first<ClaimContext>();
 }
 
 async function sourceReferences(claim: ClaimContext) {
-  const ids = [...new Set(parseJson<string[]>(claim.source_feed_ids, []).map(String).filter(Boolean))].slice(0, 6);
+  const ids = [
+    ...new Set(
+      parseJson<string[]>(claim.source_feed_ids, [])
+        .map(String)
+        .filter(Boolean),
+    ),
+  ].slice(0, 6);
   const references: SourceReference[] = [];
   for (const feedId of ids) {
-    const sample = await database().prepare(`SELECT feed_id,title,author_name,source_url,detail_text FROM trend_samples
-      WHERE feed_id=? AND processing_status='success' AND detail_text!=''`).bind(feedId).first<SourceReference>();
-    if (sample) references.push({ ...sample, detail_text: String(sample.detail_text).slice(0, 4000) });
+    const sample = await database()
+      .prepare(
+        `SELECT feed_id,title,author_name,source_url,detail_text FROM trend_samples
+      WHERE feed_id=? AND processing_status='success' AND detail_text!=''`,
+      )
+      .bind(feedId)
+      .first<SourceReference>();
+    if (sample)
+      references.push({
+        ...sample,
+        detail_text: String(sample.detail_text).slice(0, 4000),
+      });
     if (!sample && feedId.startsWith("article:")) {
-      const article = await database().prepare(`SELECT id AS feed_id,title,author_name,source_url,detail_text FROM article_research_samples
-        WHERE id=? AND processing_status='success' AND detail_text!=''`).bind(feedId.slice(8)).first<SourceReference>();
-      if (article) references.push({ ...article, feed_id: feedId, detail_text: String(article.detail_text).slice(0, 6000) });
+      const article = await database()
+        .prepare(
+          `SELECT id AS feed_id,title,author_name,source_url,detail_text FROM article_research_samples
+        WHERE id=? AND processing_status='success' AND detail_text!=''`,
+        )
+        .bind(feedId.slice(8))
+        .first<SourceReference>();
+      if (article)
+        references.push({
+          ...article,
+          feed_id: feedId,
+          detail_text: String(article.detail_text).slice(0, 6000),
+        });
     }
   }
   return references;
@@ -109,46 +224,112 @@ function canEdit(user: DbUser, claim: ClaimContext) {
   return canView(user, claim) && can(user, roleGroups.operate);
 }
 
-async function runAI<T>(kind: "content-draft" | "zhihu-article-draft", prompt: string) {
+async function runAI<T>(
+  kind:
+    | "content-draft"
+    | "zhihu-article-draft"
+    | "wechat-article-draft"
+    | "wechat-cover-prompt",
+  prompt: string,
+) {
   let response: Response;
   try {
     response = await managerFetch("/ai/run", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, prompt }),
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind, prompt }),
     });
-  } catch { throw new Error("本机 AI 创作服务未启动"); }
-  const payload = await response.json() as T & { error?: string };
+  } catch {
+    throw new Error("本机 AI 创作服务未启动");
+  }
+  const payload = (await response.json()) as T & { error?: string };
   if (!response.ok) throw new Error(payload.error || "AI 创作失败");
   return payload;
 }
 
-async function saveVersion(user: DbUser, claim: ClaimContext, draft: CreativeDraft, source: string) {
+async function saveVersion(
+  user: DbUser,
+  claim: ClaimContext,
+  draft: CreativeDraft,
+  source: string,
+) {
   const db = database();
   const now = new Date().toISOString();
   const nextVersion = Number(claim.version_number || 0) + 1;
   await db.batch([
-    db.prepare(`UPDATE claims SET title=?,body=?,tags=?,creative_json=?,creation_status='ready',creation_error='',
+    db
+      .prepare(
+        `UPDATE claims SET title=?,body=?,tags=?,creative_json=?,creation_status='ready',creation_error='',
       version_number=?,generated_at=CASE WHEN ?='ai' THEN ? ELSE generated_at END,
-      status=CASE WHEN status='revision' THEN 'writing' ELSE status END,updated_at=? WHERE id=?`)
-      .bind(draft.title, draft.body, JSON.stringify(draft.tags), JSON.stringify(draft), nextVersion, source, now, now, claim.id),
-    db.prepare(`INSERT INTO claim_versions (id,claim_id,version_number,source,title,body,tags,creative_json,created_by,created_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`)
-      .bind(crypto.randomUUID(), claim.id, nextVersion, source, draft.title, draft.body, JSON.stringify(draft.tags), JSON.stringify(draft), user.id, now),
+      status=CASE WHEN status='revision' THEN 'writing' ELSE status END,updated_at=? WHERE id=?`,
+      )
+      .bind(
+        draft.title,
+        draft.body,
+        JSON.stringify(draft.tags),
+        JSON.stringify(draft),
+        nextVersion,
+        source,
+        now,
+        now,
+        claim.id,
+      ),
+    db
+      .prepare(
+        `INSERT INTO claim_versions (id,claim_id,version_number,source,title,body,tags,creative_json,created_by,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        claim.id,
+        nextVersion,
+        source,
+        draft.title,
+        draft.body,
+        JSON.stringify(draft.tags),
+        JSON.stringify(draft),
+        user.id,
+        now,
+      ),
   ]);
-  await audit(user.id, source === "ai" ? "AI一键创作" : "保存图文稿", "claim", claim.id, `版本 ${nextVersion}`);
+  await audit(
+    user.id,
+    source === "ai" ? "AI一键创作" : "保存图文稿",
+    "claim",
+    claim.id,
+    `版本 ${nextVersion}`,
+  );
   return nextVersion;
 }
 
 export async function GET(request: Request) {
   await ensureDatabase();
   let user: DbUser;
-  try { user = await requireUser(request); } catch (response) { return response as Response; }
+  try {
+    user = await requireUser(request);
+  } catch (response) {
+    return response as Response;
+  }
   const id = new URL(request.url).searchParams.get("id") || "";
   const claim = await claimContext(id);
-  if (!claim) return Response.json({ error: "内容任务不存在" }, { status: 404 });
-  if (!canView(user, claim)) return Response.json({ error: "当前账号无法查看这个团队任务" }, { status: 403 });
-  const versions = await database().prepare(`SELECT id,version_number,source,title,created_at FROM claim_versions
-    WHERE claim_id=? ORDER BY version_number DESC LIMIT 20`).bind(id).all();
-  return Response.json({ creative: parseJson(claim.creative_json, {}), versions: versions.results });
+  if (!claim)
+    return Response.json({ error: "内容任务不存在" }, { status: 404 });
+  if (!canView(user, claim))
+    return Response.json(
+      { error: "当前账号无法查看这个团队任务" },
+      { status: 403 },
+    );
+  const versions = await database()
+    .prepare(
+      `SELECT id,version_number,source,title,created_at FROM claim_versions
+    WHERE claim_id=? ORDER BY version_number DESC LIMIT 20`,
+    )
+    .bind(id)
+    .all();
+  return Response.json({
+    creative: parseJson(claim.creative_json, {}),
+    versions: versions.results,
+  });
 }
 
 export async function POST(request: Request) {
@@ -156,35 +337,131 @@ export async function POST(request: Request) {
   const crossSite = rejectCrossSiteMutation(request);
   if (crossSite) return crossSite;
   let user: DbUser;
-  try { user = await requireUser(request); } catch (response) { return response as Response; }
-  if (!can(user, roleGroups.operate)) return forbidden("只有管理员或内容运营可以编辑内容");
-  const data = await request.json() as Record<string, unknown>;
+  try {
+    user = await requireUser(request);
+  } catch (response) {
+    return response as Response;
+  }
+  if (!can(user, roleGroups.operate))
+    return forbidden("只有管理员或内容运营可以编辑内容");
+  const data = (await request.json()) as Record<string, unknown>;
   const action = String(data.action ?? "");
   const id = String(data.id ?? "");
   let claim = await claimContext(id);
-  if (!claim) return Response.json({ error: "内容任务不存在" }, { status: 404 });
-  if (!canEdit(user, claim)) return Response.json({ error: "当前账号无法编辑这个团队任务" }, { status: 403 });
-  if (!["writing", "revision"].includes(claim.status)) return Response.json({ error: "当前内容状态不能继续创作" }, { status: 409 });
+  if (!claim)
+    return Response.json({ error: "内容任务不存在" }, { status: 404 });
+  if (!canEdit(user, claim))
+    return Response.json(
+      { error: "当前账号无法编辑这个团队任务" },
+      { status: 403 },
+    );
+  if (!["writing", "revision"].includes(claim.status))
+    return Response.json(
+      { error: "当前内容状态不能继续创作" },
+      { status: 409 },
+    );
+
+  if (action === "generate_cover_prompt") {
+    if (claim.content_type !== "wechat_article") {
+      return Response.json(
+        { error: "只有公众号文章支持独立生成封面提示词" },
+        { status: 400 },
+      );
+    }
+    const current = normalizeCreative(
+      data.creative ??
+        parseJson(claim.creative_json, {
+          title: claim.title,
+          body: claim.body,
+          tags: parseJson(claim.tags, []),
+        }),
+      claim.content_type,
+    );
+    if (!current.title || !current.body) {
+      return Response.json(
+        { error: "请先填写公众号标题和正文，再生成封面提示词" },
+        { status: 400 },
+      );
+    }
+    const prompt = `请只为下面这篇微信公众号文章生成一条可直接用于生图的封面提示词。\n\n文章标题：${current.title}\n文章正文：${current.body.slice(0, 6000)}\n\n要求：label 固定为“封面主视觉”；prompt 必须描述完整成品封面，写清主体、场景、构图、光线、色彩和风格，并要求画面逐字清晰呈现标题“${current.title}”，确保手机缩略图可读；不要输出正文配图，不要使用占位文字，不要虚构正文没有的人物、品牌、数据或案例。`;
+    try {
+      const generated = await runAI<ImagePrompt>("wechat-cover-prompt", prompt);
+      const cover = normalizeImagePrompt(
+        { label: "封面主视觉", prompt: generated.prompt },
+        0,
+      );
+      if (!cover.prompt) throw new Error("AI 未返回有效的公众号封面提示词");
+      const next = enforceCoverTitle({
+        ...current,
+        image_prompts: [
+          cover,
+          ...current.image_prompts.filter(
+            (item) => !/封面|主视觉/.test(item.label),
+          ),
+        ],
+      });
+      claim = (await claimContext(id)) as ClaimContext;
+      const version = await saveVersion(user, claim, next, "ai");
+      return Response.json({ ok: true, creative: next, version });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "公众号封面提示词生成失败";
+      return Response.json({ error: message }, { status: 502 });
+    }
+  }
 
   if (action === "generate") {
-    const instruction = String(data.instruction ?? "").trim().slice(0, 500);
+    const instruction = String(data.instruction ?? "")
+      .trim()
+      .slice(0, 500);
     const references = await sourceReferences(claim);
-    if (claim.content_type === "zhihu_article" || claim.content_type === "wechat_article") {
-      const platformName = claim.content_type === "wechat_article" ? "微信公众号" : "知乎专栏";
-      const audienceName = claim.content_type === "wechat_article" ? "公众号读者" : "关注这个问题的知乎读者";
-      const creationBrief = claim.content_type === "wechat_article" ? "微信公众号创作" : "知乎专栏创作";
-      const prompt = `你正在进行${creationBrief}，请完成一篇文章。\n\n选题：${claim.topic_title}\n发布账号：${claim.account_name}\n账号定位：${claim.persona || "未填写，按选题自然表达"}\n目标读者：${claim.audience || claim.target_audience || audienceName}\n认领角度：${claim.angle || "结合账号定位自然展开"}\n选题摘要：${claim.brief || "无"}\n用户痛点：${claim.pain_point || "无"}\n建议结构：${parseJson<string[]>(claim.content_structure, []).join(" → ") || "自行建立清晰论证结构"}\n审核意见：${claim.review_comment || "无"}\n本次补充要求：${instruction || "无"}\n真实来源正文：${references.length ? `共${references.length}条，见下方 <UNTRUSTED_SOURCE_NOTES>` : "没有已验证来源正文，不得补写来源事实"}\n\n要求：输出一篇适合${platformName}的原创长文，标题具体可信，正文至少包含问题界定、主体论证和结论；不要写 HTML，不要复制来源。严格按 JSON Schema 返回。\n\n<UNTRUSTED_SOURCE_NOTES>\n${JSON.stringify(references)}\n</UNTRUSTED_SOURCE_NOTES>`;
-      await database().prepare("UPDATE claims SET creation_status='generating',creation_error='',creation_prompt=?,updated_at=? WHERE id=?")
-        .bind(prompt, new Date().toISOString(), id).run();
+    if (
+      claim.content_type === "zhihu_article" ||
+      claim.content_type === "wechat_article"
+    ) {
+      const platformName =
+        claim.content_type === "wechat_article" ? "微信公众号" : "知乎专栏";
+      const audienceName =
+        claim.content_type === "wechat_article"
+          ? "公众号读者"
+          : "关注这个问题的知乎读者";
+      const creationBrief =
+        claim.content_type === "wechat_article"
+          ? "微信公众号创作"
+          : "知乎专栏创作";
+      const wechatRequirements =
+        claim.content_type === "wechat_article"
+          ? "正文采用适合手机阅读的短段落，并使用 Markdown 结构：## 主要小标题、### 次级标题、**重点** 加粗、> 引用和 - 列表，不要用 # 重复文章标题。image_prompts 为可选项：只有用户需要配图时才规划；可以返回空数组。若提供图片建议，第一张作为封面主视觉，其余图片服务正文结构。"
+          : "图片不是必填项，只有论证确实需要时才规划配图。";
+      const prompt = `你正在进行${creationBrief}，请完成一篇文章。\n\n选题：${claim.topic_title}\n发布账号：${claim.account_name}\n账号定位：${claim.persona || "未填写，按选题自然表达"}\n目标读者：${claim.audience || claim.target_audience || audienceName}\n认领角度：${claim.angle || "结合账号定位自然展开"}\n选题摘要：${claim.brief || "无"}\n用户痛点：${claim.pain_point || "无"}\n建议结构：${parseJson<string[]>(claim.content_structure, []).join(" → ") || "自行建立清晰论证结构"}\n审核意见：${claim.review_comment || "无"}\n本次补充要求：${instruction || "无"}\n真实来源正文：${references.length ? `共${references.length}条，见下方 <UNTRUSTED_SOURCE_NOTES>` : "没有已验证来源正文，不得补写来源事实"}\n\n要求：输出一篇适合${platformName}的原创长文，标题具体可信，正文至少包含问题界定、主体论证和结论；${wechatRequirements}不要写 HTML，不要复制来源。严格按 JSON Schema 返回。\n\n<UNTRUSTED_SOURCE_NOTES>\n${JSON.stringify(references)}\n</UNTRUSTED_SOURCE_NOTES>`;
+      await database()
+        .prepare(
+          "UPDATE claims SET creation_status='generating',creation_error='',creation_prompt=?,updated_at=? WHERE id=?",
+        )
+        .bind(prompt, new Date().toISOString(), id)
+        .run();
       try {
-        const result = normalizeCreative(await runAI<CreativeDraft>("zhihu-article-draft", prompt), claim.content_type);
-        if (!result.title || !result.body) throw new Error(`AI 返回的${platformName}标题或正文不完整`);
-        claim = await claimContext(id) as ClaimContext;
+        const draftKind =
+          claim.content_type === "wechat_article"
+            ? "wechat-article-draft"
+            : "zhihu-article-draft";
+        const result = normalizeCreative(
+          await runAI<CreativeDraft>(draftKind, prompt),
+          claim.content_type,
+        );
+        if (!result.title || !result.body)
+          throw new Error(`AI 返回的${platformName}标题或正文不完整`);
+        claim = (await claimContext(id)) as ClaimContext;
         const version = await saveVersion(user, claim, result, "ai");
         return Response.json({ ok: true, creative: result, version });
       } catch (error) {
         const message = error instanceof Error ? error.message : "AI 创作失败";
-        await database().prepare("UPDATE claims SET creation_status='error',creation_error=?,updated_at=? WHERE id=?").bind(message, new Date().toISOString(), id).run();
+        await database()
+          .prepare(
+            "UPDATE claims SET creation_status='error',creation_error=?,updated_at=? WHERE id=?",
+          )
+          .bind(message, new Date().toISOString(), id)
+          .run();
         return Response.json({ error: message }, { status: 502 });
       }
     }
@@ -222,35 +499,71 @@ export async function POST(request: Request) {
 <UNTRUSTED_SOURCE_NOTES>
 ${JSON.stringify(references)}
 </UNTRUSTED_SOURCE_NOTES>`;
-    await database().prepare("UPDATE claims SET creation_status='generating',creation_error='',creation_prompt=?,updated_at=? WHERE id=?")
-      .bind(prompt, new Date().toISOString(), id).run();
+    await database()
+      .prepare(
+        "UPDATE claims SET creation_status='generating',creation_error='',creation_prompt=?,updated_at=? WHERE id=?",
+      )
+      .bind(prompt, new Date().toISOString(), id)
+      .run();
     try {
-      const result = enforceCoverTitle(normalizeCreative(await runAI<CreativeDraft>("content-draft", prompt), claim.content_type));
-      if (!result.title || !result.body || result.image_prompts.length < 3) throw new Error("AI 返回的图文稿或图片提示词不完整");
-      claim = await claimContext(id) as ClaimContext;
+      const result = enforceCoverTitle(
+        normalizeCreative(
+          await runAI<CreativeDraft>("content-draft", prompt),
+          claim.content_type,
+        ),
+      );
+      if (!result.title || !result.body || result.image_prompts.length < 3)
+        throw new Error("AI 返回的图文稿或图片提示词不完整");
+      claim = (await claimContext(id)) as ClaimContext;
       const version = await saveVersion(user, claim, result, "ai");
       return Response.json({ ok: true, creative: result, version });
     } catch (error) {
       const message = error instanceof Error ? error.message : "AI 创作失败";
-      await database().prepare("UPDATE claims SET creation_status='error',creation_error=?,updated_at=? WHERE id=?")
-        .bind(message, new Date().toISOString(), id).run();
+      await database()
+        .prepare(
+          "UPDATE claims SET creation_status='error',creation_error=?,updated_at=? WHERE id=?",
+        )
+        .bind(message, new Date().toISOString(), id)
+        .run();
       return Response.json({ error: message }, { status: 502 });
     }
   }
 
   if (action === "save") {
-    const draft = claim.content_type === "xiaohongshu_note" ? enforceCoverTitle(normalizeCreative(data.creative, claim.content_type)) : normalizeCreative(data.creative, claim.content_type);
-    if (!draft.title || !draft.body) return Response.json({ error: "标题和正文不能为空" }, { status: 400 });
+    const draft =
+      claim.content_type === "xiaohongshu_note"
+        ? enforceCoverTitle(
+            normalizeCreative(data.creative, claim.content_type),
+          )
+        : normalizeCreative(data.creative, claim.content_type);
+    if (!draft.title || !draft.body)
+      return Response.json({ error: "标题和正文不能为空" }, { status: 400 });
     const version = await saveVersion(user, claim, draft, "manual");
     return Response.json({ ok: true, creative: draft, version });
   }
 
   if (action === "restore") {
     const versionNumber = Number(data.version_number);
-    const version = await database().prepare("SELECT * FROM claim_versions WHERE claim_id=? AND version_number=?")
-      .bind(id, versionNumber).first<{ creative_json: string }>();
-    if (!version) return Response.json({ error: "历史版本不存在" }, { status: 404 });
-    const creative = claim.content_type === "xiaohongshu_note" ? enforceCoverTitle(normalizeCreative(parseJson(version.creative_json, {}), claim.content_type)) : normalizeCreative(parseJson(version.creative_json, {}), claim.content_type);
+    const version = await database()
+      .prepare(
+        "SELECT * FROM claim_versions WHERE claim_id=? AND version_number=?",
+      )
+      .bind(id, versionNumber)
+      .first<{ creative_json: string }>();
+    if (!version)
+      return Response.json({ error: "历史版本不存在" }, { status: 404 });
+    const creative =
+      claim.content_type === "xiaohongshu_note"
+        ? enforceCoverTitle(
+            normalizeCreative(
+              parseJson(version.creative_json, {}),
+              claim.content_type,
+            ),
+          )
+        : normalizeCreative(
+            parseJson(version.creative_json, {}),
+            claim.content_type,
+          );
     const nextVersion = await saveVersion(user, claim, creative, "restore");
     return Response.json({ ok: true, creative, version: nextVersion });
   }
