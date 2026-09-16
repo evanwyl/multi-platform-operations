@@ -13,11 +13,19 @@ test("adds Zhihu through platform fields without changing Xiaohongshu trend tabl
   const app = await source("app/api/app/route.ts");
   assert.match(database, /platform TEXT NOT NULL DEFAULT 'xiaohongshu'/);
   assert.match(database, /external_user_id TEXT/);
-  assert.match(database, /content_type TEXT NOT NULL DEFAULT 'xiaohongshu_note'/);
+  assert.match(
+    database,
+    /content_type TEXT NOT NULL DEFAULT 'xiaohongshu_note'/,
+  );
   assert.match(database, /source_type TEXT NOT NULL DEFAULT 'manual'/);
   const migrationColumns = database.indexOf("const accountPlatformColumns");
-  const platformIndex = database.indexOf("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_platform_external_user");
-  assert.ok(migrationColumns >= 0 && platformIndex > migrationColumns, "platform index must be created after old databases receive platform columns");
+  const platformIndex = database.indexOf(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_platform_external_user",
+  );
+  assert.ok(
+    migrationColumns >= 0 && platformIndex > migrationColumns,
+    "platform index must be created after old databases receive platform columns",
+  );
   assert.match(database, /CREATE TABLE IF NOT EXISTS trend_samples/);
   assert.match(app, /source\.platform !== account\.platform/);
   assert.match(app, /contentTypeForPlatform/);
@@ -26,14 +34,24 @@ test("adds Zhihu through platform fields without changing Xiaohongshu trend tabl
 test("keeps Zhihu credentials out of the database and persists them with owner-only permissions", async (context) => {
   const work = await mkdtemp(resolve(tmpdir(), "hongshutai-zhihu-test-"));
   context.after(() => rm(work, { recursive: true, force: true }));
-  const adapter = await import(new URL("../runtime/platforms/zhihu-openapi.mjs", import.meta.url).href);
+  const adapter = await import(
+    new URL("../runtime/platforms/zhihu-openapi.mjs", import.meta.url).href
+  );
   const accountId = "zhihu-account-123";
-  const saved = adapter.saveZhihuCredentials(work, accountId, "example-token", "s".repeat(32));
+  const saved = adapter.saveZhihuCredentials(
+    work,
+    accountId,
+    "example-token",
+    "s".repeat(32),
+  );
   assert.equal(saved.configured, true);
   assert.equal(adapter.zhihuAuthStatus(work, accountId).configured, true);
   const credentialFile = resolve(work, accountId, "openapi.json");
   assert.equal((await stat(credentialFile)).mode & 0o777, 0o600);
-  assert.equal(adapter.plainTextToArticleHtml("第一段\n换行\n\n第二段"), "<p>第一段<br />换行</p>\n<p>第二段</p>");
+  assert.equal(
+    adapter.plainTextToArticleHtml("第一段\n换行\n\n第二段"),
+    "<p>第一段<br />换行</p>\n<p>第二段</p>",
+  );
 });
 
 test("uses an isolated persistent Chromium profile for default Zhihu login", async () => {
@@ -76,13 +94,22 @@ test("allows text-only Zhihu review but retains Xiaohongshu image review", async
   const app = await source("app/api/app/route.ts");
   const creation = await source("app/api/creation/route.ts");
   const ui = await source("app/PlatformApp.tsx");
-  assert.match(app, /requiresReviewImages\(claim\.content_type\) && !images\.length/);
-  assert.match(app, /requiresReviewImages\(claim\.content_type\) && !reviewImages\.length/);
+  assert.match(
+    app,
+    /requiresReviewImages\(claim\.content_type\) && !images\.length/,
+  );
+  assert.match(
+    app,
+    /requiresReviewImages\(claim\.content_type\)\s*&&\s*!reviewImages\.length/,
+  );
   assert.match(creation, /zhihu-article-draft/);
   assert.match(creation, /知乎专栏创作/);
   assert.match(ui, /\{selectedPlatformName\}当前为文本审核/);
-  assert.match(ui, /知乎文章配图为可选项，可直接进行文本审核/);
-  assert.match(ui, /disabled=\{busy \|\| \(!isZhihuClaim\(claim\) && !claim\.publish_images\?\.length\)\}/);
+  assert.match(ui, /文章正文配图为可选项，可直接审核/);
+  assert.match(
+    ui,
+    /isXiaohongshuClaim\(claim\)[\s\S]{0,120}!claim\.publish_images\?\.length/,
+  );
   assert.match(ui, /通过文章并转入发布/);
   assert.match(ui, /确认并发布专栏/);
 });
@@ -91,8 +118,14 @@ test("confirms a browser publish only from the final Zhihu article URL", async (
   const browser = await source("runtime/platforms/zhihu-browser.mjs");
   assert.match(browser, /zhuanlan\.zhihu\.com\/write/);
   assert.match(browser, /请输入标题（最多 100 个字）/);
-  assert.match(browser, /async function firstVisible\(page, selectors, timeout = 15_000\)/);
-  assert.match(browser, /await page\.waitForTimeout\(Math\.min\(250, deadline - Date\.now\(\)\)\)/);
+  assert.match(
+    browser,
+    /async function firstVisible\(page, selectors, timeout = 15_000\)/,
+  );
+  assert.match(
+    browser,
+    /await page\.waitForTimeout\(Math\.min\(250, deadline - Date\.now\(\)\)\)/,
+  );
   assert.match(browser, /public-DraftEditor-content/);
   assert.match(browser, /button:text-is\('发布'\)/);
   assert.match(browser, /publishedArticle/);
@@ -105,7 +138,8 @@ test("keeps WeChat accounts and publishing isolated from Xiaohongshu", async () 
   const publish = await source("app/api/publish/route.ts");
   const ui = await source("app/PlatformApp.tsx");
   assert.match(platforms, /wechat_article/);
-  assert.match(publish, /微信公众号发布适配器尚未开放/);
+  assert.match(publish, /isWechatArticle/);
+  assert.match(publish, /\/wechat\/publish/);
   assert.match(ui, /fixed-platform-field/);
   assert.doesNotMatch(ui, /<select name="platform">/);
 });

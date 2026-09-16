@@ -6,19 +6,29 @@ const workerUrl = new URL("../dist/server/index.js", import.meta.url);
 
 test("renders the local operations platform shell", async () => {
   const { default: worker } = await import(workerUrl.href);
-  const response = await worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), {
-    ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
-  }, { waitUntil() {}, passThroughOnException() {} });
+  const response = await worker.fetch(
+    new Request("http://localhost/", { headers: { accept: "text/html" } }),
+    {
+      ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
+    },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /<title>红薯台｜多平台内容运营中台<\/title>/);
-  assert.match(html, /正在启动红薯台/);
+  assert.match(html, /<title>多平台内容运营<\/title>/);
+  assert.match(html, /正在启动多平台内容运营/);
   assert.doesNotMatch(html, /codex-preview/);
 });
 
 test("opens an explicit account menu before signing out and shows AI wait progress", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const styles = await readFile(new URL("../app/brand-system.css", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const styles = await readFile(
+    new URL("../app/brand-system.css", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /profileMenuOpen/);
   assert.match(source, /role="menu"/);
   assert.match(source, /role="menuitem"/);
@@ -31,38 +41,68 @@ test("opens an explicit account menu before signing out and shows AI wait progre
 });
 
 test("does not expose a personal name in the administrator setup example", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
   assert.doesNotMatch(source, /万勇龙/);
   assert.match(source, /placeholder="请输入管理员显示名称"/);
 });
 
 test("keeps trend work mounted and starts only from the button", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /hidden=\{view !== "trends"\}/);
   assert.match(source, /onClick=\{startScan\}/);
   assert.doesNotMatch(source, /onKeyDown=\{[^\n]*startScan/);
 });
 
 test("makes dashboard summaries and recent tasks real navigation controls", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const styles = await readFile(new URL("../app/brand-system.css", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const styles = await readFile(
+    new URL("../app/brand-system.css", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /aria-label="工作台快捷入口"/);
   assert.match(source, /label="待认领选题"[\s\S]*setView\("topics"\)/);
   assert.match(source, /label="我的创作"[\s\S]*setView\("content"\)/);
   assert.match(source, /label="等待审核"[\s\S]*setView\("review"\)/);
   assert.match(source, /label="累计已发布"[\s\S]*setView\("publish"\)/);
-  assert.match(source, /className="task-row"[\s\S]*onClick=\{\(\) => openClaim\(claim\)\}/);
-  assert.match(source, /useState\(initialTarget\?\.account_id \?\? initialAccountId \?\? ""\)/);
+  assert.match(
+    source,
+    /className="task-row"[\s\S]*onClick=\{\(\) => openClaim\(claim\)\}/,
+  );
+  assert.match(
+    source,
+    /useState\([\s\S]{0,80}initialTarget\?\.account_id[\s\S]{0,80}initialAccountId/,
+  );
   assert.match(source, /useState\(initialTarget\?\.id \?\? ""\)/);
-  assert.match(source, /function Metric[\s\S]*<button type="button"/);
+  assert.match(
+    source,
+    /function Metric[\s\S]{0,1500}<button[\s\S]{0,80}type="button"/,
+  );
   assert.match(styles, /\.metrics \.metric-card:hover/);
   assert.match(styles, /\.task-row:focus-visible/);
 });
 
 test("keeps AI creation mounted and recommends whole-post image prompts without page cards or image generation", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const creationRoute = await readFile(new URL("../app/api/creation/route.ts", import.meta.url), "utf8");
-  const runtime = await readFile(new URL("../runtime/manager.mjs", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const creationRoute = await readFile(
+    new URL("../app/api/creation/route.ts", import.meta.url),
+    "utf8",
+  );
+  const runtime = await readFile(
+    new URL("../runtime/manager.mjs", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /hidden=\{view !== "content"\}/);
   assert.match(source, /action: "generate"/);
   assert.match(source, /整个帖子的图片提示词/);
@@ -75,10 +115,19 @@ test("keeps AI creation mounted and recommends whole-post image prompts without 
   assert.match(source, /封面主视觉必须包含上方最终标题的逐字文字/);
   assert.doesNotMatch(source, /saved\.pages|legacyPrompts/);
   assert.doesNotMatch(creationRoute, /draft\.pages|legacyPrompts/);
-  assert.doesNotMatch(source, /3:4 页面预览|creative-gallery|downloadCreativeCard|单页重做/);
+  assert.doesNotMatch(
+    source,
+    /3:4 页面预览|creative-gallery|downloadCreativeCard|单页重做/,
+  );
   assert.doesNotMatch(creationRoute, /regenerate_page|content-page/);
-  assert.doesNotMatch(source, /action: "generate_image"|AI 生图中|下载 AI 原图/);
-  assert.doesNotMatch(runtime, /\/codex\/image|runImageGen|imageGeneration|content-page/);
+  assert.doesNotMatch(
+    source,
+    /action: "generate_image"|AI 生图中|下载 AI 原图/,
+  );
+  assert.doesNotMatch(
+    runtime,
+    /\/codex\/image|runImageGen|imageGeneration|content-page/,
+  );
   assert.match(runtime, /content-system\.md/);
   assert.match(runtime, /humanizer-system\.md/);
   assert.match(runtime, /EMBEDDED_HUMANIZER_SKILL/);
@@ -92,25 +141,49 @@ test("keeps AI creation mounted and recommends whole-post image prompts without 
 });
 
 test("runs the Humanizer skill after Xiaohongshu expert drafting", async () => {
-  const creationRoute = await readFile(new URL("../app/api/creation/route.ts", import.meta.url), "utf8");
-  const contentPrompt = await readFile(new URL("../runtime/prompts/content-system.md", import.meta.url), "utf8");
-  const humanizerPrompt = await readFile(new URL("../runtime/prompts/humanizer-system.md", import.meta.url), "utf8");
+  const creationRoute = await readFile(
+    new URL("../app/api/creation/route.ts", import.meta.url),
+    "utf8",
+  );
+  const contentPrompt = await readFile(
+    new URL("../runtime/prompts/content-system.md", import.meta.url),
+    "utf8",
+  );
+  const humanizerPrompt = await readFile(
+    new URL("../runtime/prompts/humanizer-system.md", import.meta.url),
+    "utf8",
+  );
   assert.match(creationRoute, /小红书运营专家完成初稿 → Humanizer/);
   assert.match(contentPrompt, /不得跳过第二遍去 AI 味检查/);
   assert.match(humanizerPrompt, /blader\/humanizer/);
   assert.match(humanizerPrompt, /版本 `2\.11\.2`/);
   assert.match(humanizerPrompt, /不虚构事实、体验、情绪、案例/);
-  assert.match(humanizerPrompt, /不把面向生图模型的 `image_prompts` 当作普通文章改写/);
+  assert.match(
+    humanizerPrompt,
+    /不把面向生图模型的 `image_prompts` 当作普通文章改写/,
+  );
   assert.match(humanizerPrompt, /最终标题与封面主视觉提示词中的标题逐字一致/);
 });
 
 test("uses a locally configured AI API without exposing or requiring Codex", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const appRoute = await readFile(new URL("../app/api/app/route.ts", import.meta.url), "utf8");
-  const runtime = await readFile(new URL("../runtime/manager.mjs", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const appRoute = await readFile(
+    new URL("../app/api/app/route.ts", import.meta.url),
+    "utf8",
+  );
+  const runtime = await readFile(
+    new URL("../runtime/manager.mjs", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /连接你自己的 AI 服务/);
   assert.match(source, /测试当前输入/);
-  assert.match(source, /action: "test_ai_settings", base_url: baseUrl, model, api_key: apiKey/);
+  assert.match(
+    source,
+    /action: "test_ai_settings"[\s\S]{0,120}base_url: baseUrl[\s\S]{0,80}api_key: apiKey/,
+  );
   assert.match(appRoute, /save_ai_settings/);
   assert.match(appRoute, /test_ai_settings/);
   assert.match(runtime, /\/chat\/completions/);
@@ -122,7 +195,10 @@ test("uses a locally configured AI API without exposing or requiring Codex", asy
 });
 
 test("includes successfully fetched source notes as protected rewrite references", async () => {
-  const route = await readFile(new URL("../app/api/creation/route.ts", import.meta.url), "utf8");
+  const route = await readFile(
+    new URL("../app/api/creation/route.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(route, /source_feed_ids/);
   assert.match(route, /FROM trend_samples/);
   assert.match(route, /processing_status='success' AND detail_text!=''/);
@@ -132,16 +208,28 @@ test("includes successfully fetched source notes as protected rewrite references
 });
 
 test("starts Xiaohongshu collection in headed browser mode", async () => {
-  const runtime = await readFile(new URL("../runtime/manager.mjs", import.meta.url), "utf8");
+  const runtime = await readFile(
+    new URL("../runtime/manager.mjs", import.meta.url),
+    "utf8",
+  );
   assert.match(runtime, /const HEADED_BROWSER = true/);
   assert.match(runtime, /`-headless=\$\{!HEADED_BROWSER\}`/);
   assert.doesNotMatch(runtime, /slot\.purpose !== "verification"/);
 });
 
 test("preserves requested media type and progressively enriches retained research samples", async () => {
-  const route = await readFile(new URL("../app/api/trends/route.ts", import.meta.url), "utf8");
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const planSchema = await readFile(new URL("../runtime/trend-plan.schema.json", import.meta.url), "utf8");
+  const route = await readFile(
+    new URL("../app/api/trends/route.ts", import.meta.url),
+    "utf8",
+  );
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const planSchema = await readFile(
+    new URL("../runtime/trend-plan.schema.json", import.meta.url),
+    "utf8",
+  );
   assert.match(planSchema, /"content_type"/);
   assert.match(route, /noteType === "normal"/);
   assert.match(route, /sample\.note_type === "normal"/);
@@ -156,9 +244,15 @@ test("preserves requested media type and progressively enriches retained researc
   assert.match(route, /get_feed_detail[\s\S]*45_000/);
   assert.match(route, /search_feeds", args, 70_000/);
   assert.match(route, /已保留前面结果并继续下一个关键词/);
-  assert.match(route, /平台排序筛选不可用，已保留时间范围并按真实互动数据本地排序/);
+  assert.match(
+    route,
+    /平台排序筛选不可用，已保留时间范围并按真实互动数据本地排序/,
+  );
   assert.match(source, /messageHasWarning/);
-  assert.match(source, /messageHasError \? "bad" : messageHasWarning \? "warn"/);
+  assert.match(
+    source,
+    /messageHasError \? "bad" : messageHasWarning \? "warn"/,
+  );
   assert.match(route, /completed_keywords=\?,error=CASE/);
   assert.doesNotMatch(route, /index < 2/);
   assert.match(route, /feed\.xsecToken \|\| "", "", card\?\.interactInfo/);
@@ -179,7 +273,10 @@ test("preserves requested media type and progressively enriches retained researc
   assert.match(route, /ai\/cancel/);
   assert.match(source, /等待处理/);
   assert.match(source, /只保留标题、作者和真实互动数据/);
-  assert.match(route, /metricValue\(sample\.liked_count\) \+ metricValue\(sample\.collected_count\) \* 1\.5 \+ metricValue\(sample\.comment_count\) \* 2/);
+  assert.match(
+    route,
+    /metricValue\(sample\.liked_count\) \+ metricValue\(sample\.collected_count\) \* 1\.5 \+ metricValue\(sample\.comment_count\) \* 2/,
+  );
   assert.match(route, /selection_status='selected'/);
   assert.match(route, /titleSimilarity/);
   assert.match(route, />= 0\.72/);
@@ -187,7 +284,10 @@ test("preserves requested media type and progressively enriches retained researc
   assert.match(source, /详情获取失败/);
   assert.match(source, /已存在\/重复/);
   assert.match(route, /processing_status='success' AND detail_text!=''/);
-  assert.match(route, /status!='archived' AND selection_status='selected' AND processing_status='success'/);
+  assert.match(
+    route,
+    /status!='archived' AND selection_status='selected' AND processing_status='success'/,
+  );
   assert.match(route, /正文获取成功的爆款样本不足3条/);
   assert.match(route, /正文和爆点拆解尚未成功，不能转入选题中心/);
   assert.match(source, /正文成功后可转入/);
@@ -196,18 +296,33 @@ test("preserves requested media type and progressively enriches retained researc
 });
 
 test("allows adding a sample topic without entering a replacement title", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const route = await readFile(new URL("../app/api/trends/route.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const route = await readFile(
+    new URL("../app/api/trends/route.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /选题标题（选填）/);
   assert.match(source, /不填写则使用样本标题/);
-  assert.doesNotMatch(source, /onChange=\{\(event\) => setTopicTitle\(event\.target\.value\)\} required/);
+  assert.doesNotMatch(
+    source,
+    /onChange=\{\(event\) => setTopicTitle\(event\.target\.value\)\} required/,
+  );
   assert.match(route, /trim\(\) \|\| sample\.title/);
   assert.doesNotMatch(route, /请填写原创选题标题/);
 });
 
 test("supports bulk sample transfer and keeps the topic center on one page scrollbar", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const route = await readFile(new URL("../app/api/trends/route.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const route = await readFile(
+    new URL("../app/api/trends/route.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /create_topics_bulk/);
   assert.match(source, /全选当前列表/);
   assert.match(source, /批量转入选题中心/);
@@ -217,27 +332,60 @@ test("supports bulk sample transfer and keeps the topic center on one page scrol
   assert.match(route, /action === "create_topics_bulk"/);
   assert.match(route, /sample\.status !== "new"/);
   assert.match(route, /UPDATE trend_samples SET status='used'/);
-  const theme = await readFile(new URL("../app/product-theme.css", import.meta.url), "utf8");
-  assert.match(theme, /\.view-topics \.platform-topic-page\s*\{[^}]*height: auto;[^}]*overflow: visible;/s);
-  assert.match(theme, /\.view-topics \.platform-topic-page > \.data-panel > \.topic-cards\s*\{[^}]*overflow: visible;/s);
+  const theme = await readFile(
+    new URL("../app/product-theme.css", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    theme,
+    /\.view-topics \.platform-topic-page\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
+  );
+  assert.match(
+    theme,
+    /\.view-topics \.platform-topic-page > \.data-panel > \.topic-cards\s*\{[^}]*overflow: visible;/s,
+  );
 });
 
 test("uses account-aware quality gates without automatically writing to the topic center", async () => {
-  const route = await readFile(new URL("../app/api/trends/route.ts", import.meta.url), "utf8");
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const database = await readFile(new URL("../lib/database.ts", import.meta.url), "utf8");
-  const planSchema = await readFile(new URL("../runtime/trend-plan.schema.json", import.meta.url), "utf8");
-  const analysisSchema = await readFile(new URL("../runtime/topic-analysis.schema.json", import.meta.url), "utf8");
-  const candidateSchema = await readFile(new URL("../runtime/candidate-screen.schema.json", import.meta.url), "utf8");
+  const route = await readFile(
+    new URL("../app/api/trends/route.ts", import.meta.url),
+    "utf8",
+  );
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const database = await readFile(
+    new URL("../lib/database.ts", import.meta.url),
+    "utf8",
+  );
+  const planSchema = await readFile(
+    new URL("../runtime/trend-plan.schema.json", import.meta.url),
+    "utf8",
+  );
+  const analysisSchema = await readFile(
+    new URL("../runtime/topic-analysis.schema.json", import.meta.url),
+    "utf8",
+  );
+  const candidateSchema = await readFile(
+    new URL("../runtime/candidate-screen.schema.json", import.meta.url),
+    "utf8",
+  );
   assert.match(planSchema, /"primary_keyword"/);
   assert.match(planSchema, /"intent_phrase"/);
   assert.match(planSchema, /"scenario_terms"/);
   assert.match(candidateSchema, /"intent_match_score"/);
   assert.match(candidateSchema, /"account_fit_score"/);
-  assert.match(route, /relevance \* \.55 \+ intent \* \.25 \+ heatScores\[index\] \* \.20/);
+  assert.match(
+    route,
+    /relevance \* \.55 \+ intent \* \.25 \+ heatScores\[index\] \* \.20/,
+  );
   assert.match(route, /information >= 60 && remix >= 60 && accountFit >= 55/);
   assert.match(route, /qualityTier === "core"/);
-  const analysisBlock = route.slice(route.indexOf('action === "analyze_scan"'), route.indexOf('action === "create_topics_bulk"'));
+  const analysisBlock = route.slice(
+    route.indexOf('action === "analyze_scan"'),
+    route.indexOf('action === "create_topics_bulk"'),
+  );
   assert.doesNotMatch(analysisBlock, /INSERT INTO topics/);
   assert.match(analysisBlock, /未写入选题中心/);
   assert.doesNotMatch(analysisSchema, /"topics"/);
@@ -255,8 +403,14 @@ test("uses account-aware quality gates without automatically writing to the topi
 });
 
 test("supports confirmed bulk deletion without hard-deleting sample or topic records", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const route = await readFile(new URL("../app/api/trends/route.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const route = await readFile(
+    new URL("../app/api/trends/route.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /archive_samples_bulk/);
   assert.match(source, /confirmingSampleDelete/);
   assert.match(source, /role="alertdialog"/);
@@ -270,8 +424,14 @@ test("supports confirmed bulk deletion without hard-deleting sample or topic rec
 });
 
 test("groups the topic center by real workflow status", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const styles = await readFile(
+    new URL("../app/globals.css", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /topicFilter/);
   assert.match(source, /待认领/);
   assert.match(source, /创作中/);
@@ -283,9 +443,18 @@ test("groups the topic center by real workflow status", async () => {
 });
 
 test("supports selecting and safely bulk deleting topics", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const route = await readFile(new URL("../app/api/app/route.ts", import.meta.url), "utf8");
-  const brand = await readFile(new URL("../app/brand-system.css", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const route = await readFile(
+    new URL("../app/api/app/route.ts", import.meta.url),
+    "utf8",
+  );
+  const brand = await readFile(
+    new URL("../app/brand-system.css", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /selectedTopics/);
   assert.match(source, /全选当前分类/);
   assert.match(source, /archive_topics_bulk/);
@@ -296,13 +465,25 @@ test("supports selecting and safely bulk deleting topics", async () => {
   assert.doesNotMatch(route, /DELETE FROM topics/i);
   assert.match(brand, /grid-template-columns: 26px 64px minmax\(0, 1fr\) auto/);
   assert.match(brand, /\.topic-claim-button \{[\s\S]*?grid-column: 4/);
-  assert.match(brand, /\.view-topics \.topic-status-tabs button \{[\s\S]*?width: 84px/);
-  assert.match(brand, /\.view-topics \.topic-batch-bar \{[\s\S]*?margin-inline: 0/);
+  assert.match(
+    brand,
+    /\.view-topics \.topic-status-tabs button \{[\s\S]*?width: 84px/,
+  );
+  assert.match(
+    brand,
+    /\.view-topics \.topic-batch-bar \{[\s\S]*?margin-inline: 0/,
+  );
 });
 
 test("authenticates the runtime manager MCP readiness probe", async () => {
-  const runtime = await readFile(new URL("../runtime/manager.mjs", import.meta.url), "utf8");
-  const route = await readFile(new URL("../app/api/trends/route.ts", import.meta.url), "utf8");
+  const runtime = await readFile(
+    new URL("../runtime/manager.mjs", import.meta.url),
+    "utf8",
+  );
+  const route = await readFile(
+    new URL("../app/api/trends/route.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(runtime, /authorization: `Bearer \$\{managerToken\}`/);
   assert.match(runtime, /小红书 MCP 就绪检查超时/);
   assert.match(route, /本次搜索没有获得任何样本/);
@@ -310,8 +491,14 @@ test("authenticates the runtime manager MCP readiness probe", async () => {
 });
 
 test("blocks legacy AI topics whose source body was never verified", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const route = await readFile(new URL("../app/api/app/route.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const route = await readFile(
+    new URL("../app/api/app/route.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(route, /source_detail_verified/);
   assert.match(route, /来源正文尚未验证，暂时不能认领创作/);
   assert.match(source, /来源正文未验证/);
@@ -320,7 +507,10 @@ test("blocks legacy AI topics whose source body was never verified", async () =>
 });
 
 test("groups review records by pending, approved, and rejected status", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /reviewFilter/);
   assert.match(source, /review-status-tabs/);
   assert.match(source, /label: "待审核"/);
@@ -331,8 +521,14 @@ test("groups review records by pending, approved, and rejected status", async ()
 });
 
 test("lets admins remove other members while preserving attributed history", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const route = await readFile(new URL("../app/api/app/route.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const route = await readFile(
+    new URL("../app/api/app/route.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /remove_user/);
   assert.match(source, /删除成员/);
   assert.match(source, /window\.confirm/);
@@ -345,31 +541,58 @@ test("lets admins remove other members while preserving attributed history", asy
 });
 
 test("shares content visibility while limiting edits to content operators", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const creationRoute = await readFile(new URL("../app/api/creation/route.ts", import.meta.url), "utf8");
-  const appRoute = await readFile(new URL("../app/api/app/route.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const creationRoute = await readFile(
+    new URL("../app/api/creation/route.ts", import.meta.url),
+    "utf8",
+  );
+  const appRoute = await readFile(
+    new URL("../app/api/app/route.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /const teamClaims = data\.claims/);
   assert.match(source, /共 \{claims\.length\} 条团队内容/);
   assert.match(source, /查看账号资料与内容进度/);
   assert.doesNotMatch(source, /const ownedClaims = data\.claims/);
   assert.match(creationRoute, /return Boolean\(user\.id && claim\.id\)/);
-  assert.match(creationRoute, /return canView\(user, claim\) && can\(user, roleGroups\.operate\)/);
+  assert.match(
+    creationRoute,
+    /return canView\(user, claim\) && can\(user, roleGroups\.operate\)/,
+  );
   assert.doesNotMatch(appRoute, /claim\.owner_id !== user\.id/);
   assert.doesNotMatch(creationRoute, /claim\.owner_id === user\.id/);
 });
 
 test("shows claim and publish staff identities and records the actual publisher", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const appRoute = await readFile(new URL("../app/api/app/route.ts", import.meta.url), "utf8");
-  const publishRoute = await readFile(new URL("../app/api/publish/route.ts", import.meta.url), "utf8");
-  const database = await readFile(new URL("../lib/database.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const appRoute = await readFile(
+    new URL("../app/api/app/route.ts", import.meta.url),
+    "utf8",
+  );
+  const publishRoute = await readFile(
+    new URL("../app/api/publish/route.ts", import.meta.url),
+    "utf8",
+  );
+  const database = await readFile(
+    new URL("../lib/database.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /认领工作人员/);
   assert.match(source, /确认由我认领/);
   assert.match(source, /内容负责人/);
   assert.match(source, /发布操作人/);
   assert.match(source, /publisher_name/);
   assert.match(appRoute, /publisher\.name AS publisher_name/);
-  assert.match(appRoute, /LEFT JOIN users publisher ON publisher\.id=c\.publisher_id/);
+  assert.match(
+    appRoute,
+    /LEFT JOIN users publisher ON publisher\.id=c\.publisher_id/,
+  );
   assert.match(publishRoute, /publisher_id=\?/);
   assert.match(publishRoute, /发布人 \$\{user\.name\}/);
   assert.match(database, /\["publisher_id", "TEXT"\]/);
@@ -377,28 +600,40 @@ test("shows claim and publish staff identities and records the actual publisher"
 });
 
 test("shows complete content task labels and separates review from real publishing", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const publishRoute = await readFile(new URL("../app/api/publish/route.ts", import.meta.url), "utf8");
-  const manager = await readFile(new URL("../runtime/manager.mjs", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const publishRoute = await readFile(
+    new URL("../app/api/publish/route.ts", import.meta.url),
+    "utf8",
+  );
+  const manager = await readFile(
+    new URL("../runtime/manager.mjs", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /claim\.title \|\| claim\.topic_title/);
   assert.match(source, /nav-group-label">平台选择/);
   assert.doesNotMatch(source, /平台快捷入口/);
   assert.doesNotMatch(source, /function PlatformCenter/);
   assert.doesNotMatch(source, /function PlatformWorkspace/);
   assert.match(source, /nav-group-label">总览/);
-  assert.match(source, />工作台<\/button>/);
+  assert.match(source, />\s*工作台\s*<\/button>/);
   assert.doesNotMatch(source, /goPlatformView\("dashboard"/);
-  assert.match(source, />爆款搜索<\/button>/);
-  assert.match(source, />选题中心<\/button>/);
+  assert.match(source, />\s*爆款搜索\s*<\/button>/);
+  assert.match(source, />\s*选题中心\s*<\/button>/);
   assert.doesNotMatch(source, /platform-source-note/);
   assert.match(source, /知乎专栏选题库/);
   assert.match(source, /小红书图文选题库/);
   assert.match(source, /platform=\{scopePlatform \|\| "xiaohongshu"\}/);
   assert.doesNotMatch(source, /newTopicPlatform/);
-  assert.match(source, />我的内容<\/button>/);
+  assert.match(source, />\s*我的内容\s*<\/button>/);
   assert.match(source, /审核中心/);
   assert.match(source, /发布列表/);
-  assert.match(source, />账号管理\{accounts\.length \? <b>\{accounts\.length\}<\/b> : null\}<\/button>/);
+  assert.match(
+    source,
+    />\s*账号管理\s*\{accounts\.length[\s\S]{0,100}<b>\{accounts\.length\}<\/b>[\s\S]{0,60}<\/button>/,
+  );
   assert.match(source, /\["xiaohongshu", "zhihu", "wechat"\]/);
   assert.match(source, /fixed-platform-field/);
   assert.doesNotMatch(source, /<select name="platform">/);
@@ -406,8 +641,8 @@ test("shows complete content task labels and separates review from real publishi
   assert.match(source, /sidebar-account-section/);
   assert.match(source, /platform-account-children/);
   assert.doesNotMatch(source, /platform-account-label/);
-  assert.match(source, /发布设计中/);
-  assert.match(source, /审核可以继续，正式发布暂不开放/);
+  assert.match(source, /草稿箱发布/);
+  assert.match(source, /确认并写入草稿箱/);
   assert.doesNotMatch(source, /account-action-grid/);
   assert.match(source, /账号资料与内容概览/);
   assert.match(source, /<h2>创作内容<\/h2>/);
@@ -417,9 +652,12 @@ test("shows complete content task labels and separates review from real publishi
   assert.match(source, /审核冻结图文/);
   assert.match(source, /publish_snapshot/);
   assert.match(source, /window\.confirm/);
-  assert.match(publishRoute, /callMcpTool\(port, "publish_content"/);
+  assert.match(publishRoute, /callMcpTool\(\s*port,\s*"publish_content"/);
   assert.match(publishRoute, /const PUBLISH_TIMEOUT_MS = 6 \* 60 \* 1000/);
-  assert.match(publishRoute, /publish_content", \{ title, content: body, images, tags: cleanTags \}, PUBLISH_TIMEOUT_MS/);
+  assert.match(
+    publishRoute,
+    /"publish_content",\s*\{ title, content: body, images, tags: cleanTags \},\s*PUBLISH_TIMEOUT_MS/,
+  );
   assert.match(publishRoute, /content: body, images, tags: cleanTags/);
   assert.doesNotMatch(publishRoute, /tagText|`\$\{body\}\\n\\n\$\{tagText\}`/);
   assert.match(publishRoute, /UPDATE claims SET status='published'/);
@@ -428,11 +666,23 @@ test("shows complete content task labels and separates review from real publishi
 });
 
 test("uses one restrained product theme and one consistent icon family", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
-  const theme = await readFile(new URL("../app/product-theme.css", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const layout = await readFile(
+    new URL("../app/layout.tsx", import.meta.url),
+    "utf8",
+  );
+  const theme = await readFile(
+    new URL("../app/product-theme.css", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /from "@phosphor-icons\/react"/);
-  assert.match(source, /<NavIcon aria-hidden="true" size=\{18\}/);
+  assert.match(
+    source,
+    /<NavIcon[\s\S]{0,80}aria-hidden="true"[\s\S]{0,80}size=\{18\}/,
+  );
   assert.match(source, /<MetricIcon aria-hidden="true" size=\{19\}/);
   assert.match(source, /className="skip-link" href="#main-content"/);
   assert.match(source, /aria-current=\{active \? "page" : undefined\}/);
@@ -442,8 +692,14 @@ test("uses one restrained product theme and one consistent icon family", async (
   assert.doesNotMatch(source, />新建内容<\/button>/);
   assert.match(source, /task-table-head/);
   assert.match(source, /平台运行状态/);
-  assert.match(theme, /\.view-topics \.creation-strip h2\s*\{[^}]*color: var\(--ink\)/s);
-  assert.match(theme, /\.view-topics \.topic-status-tabs\s*\{[^}]*grid-template-columns: repeat\(6, minmax\(0, 1fr\)\)[^}]*overflow: visible/s);
+  assert.match(
+    theme,
+    /\.view-topics \.creation-strip h2\s*\{[^}]*color: var\(--ink\)/s,
+  );
+  assert.match(
+    theme,
+    /\.view-topics \.topic-status-tabs\s*\{[^}]*grid-template-columns: repeat\(6, minmax\(0, 1fr\)\)[^}]*overflow: visible/s,
+  );
   assert.match(theme, /\.focus-card h2\s*\{[^}]*white-space: nowrap/s);
   assert.match(layout, /import "\.\/product-theme\.css"/);
   assert.match(theme, /--brand-primary: #4f63d8/);
@@ -456,15 +712,33 @@ test("uses one restrained product theme and one consistent icon family", async (
 });
 
 test("uses one page scrollbar for content creation", async () => {
-  const styles = await readFile(new URL("../app/brand-system.css", import.meta.url), "utf8");
-  assert.match(styles, /\.view-content \.creative-task-list,[\s\S]*?\.view-content \.visual-builder\s*\{[\s\S]*?position: static;[\s\S]*?max-height: none;[\s\S]*?overflow: visible;/);
+  const styles = await readFile(
+    new URL("../app/brand-system.css", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    styles,
+    /\.view-content \.creative-task-list,[\s\S]*?\.view-content \.visual-builder\s*\{[\s\S]*?position: static;[\s\S]*?max-height: none;[\s\S]*?overflow: visible;/,
+  );
 });
 
 test("organizes my content by account, content list, and AI editor", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const brand = await readFile(new URL("../app/brand-system.css", import.meta.url), "utf8");
-  const theme = await readFile(new URL("../app/product-theme.css", import.meta.url), "utf8");
-  assert.match(source, /useState<"accounts" \| "list" \| "editor">/);
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const brand = await readFile(
+    new URL("../app/brand-system.css", import.meta.url),
+    "utf8",
+  );
+  const theme = await readFile(
+    new URL("../app/product-theme.css", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /useState<[\s\S]{0,180}"accounts"[\s\S]{0,180}"list"[\s\S]{0,180}"editor"[\s\S]{0,40}>/,
+  );
   assert.match(source, /先选择要管理的内容账号/);
   assert.match(source, /进入账号 →/);
   assert.match(source, /← 返回账号/);
@@ -475,14 +749,26 @@ test("organizes my content by account, content list, and AI editor", async () =>
   assert.match(brand, /\.content-account-overview-grid/);
   assert.match(brand, /\.content-task-grid/);
   assert.match(theme, /\.view-content \.creative-shell\.content-editor-shell/);
-  assert.match(theme, /grid-template-columns: minmax\(0, 1\.35fr\) minmax\(260px, \.85fr\)/);
-  assert.match(theme, /\.view-content \.content-editor-shell \.visual-builder\s*\{[\s\S]*?grid-column: auto;/);
+  assert.match(
+    theme,
+    /grid-template-columns: minmax\(0, 1\.35fr\) minmax\(260px, 0?\.85fr\)/,
+  );
+  assert.match(
+    theme,
+    /\.view-content \.content-editor-shell \.visual-builder\s*\{[\s\S]*?grid-column: auto;/,
+  );
   assert.match(theme, /@media \(max-width: 900px\)/);
 });
 
 test("uploads and reviews final images before publishing", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const styles = await readFile(new URL("../app/brand-system.css", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const styles = await readFile(
+    new URL("../app/brand-system.css", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /最终审核图片/);
   assert.match(source, /upload_review_images/);
   assert.match(source, /保存图文并提交审核/);
@@ -494,8 +780,14 @@ test("uploads and reviews final images before publishing", async () => {
 });
 
 test("allows unpublished content to return to revision before publishing", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const publishRoute = await readFile(new URL("../app/api/publish/route.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const publishRoute = await readFile(
+    new URL("../app/api/publish/route.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /returnForRevision/);
   assert.match(source, /退回修改/);
   assert.match(source, /原文案、配图和历史审核记录均已保留/);
@@ -506,10 +798,22 @@ test("allows unpublished content to return to revision before publishing", async
 });
 
 test("builds trend research records around text, metrics, and per-sample analysis", async () => {
-  const source = await readFile(new URL("../app/PlatformApp.tsx", import.meta.url), "utf8");
-  const trends = await readFile(new URL("../app/api/trends/route.ts", import.meta.url), "utf8");
-  const database = await readFile(new URL("../lib/database.ts", import.meta.url), "utf8");
-  const schema = await readFile(new URL("../runtime/topic-analysis.schema.json", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const trends = await readFile(
+    new URL("../app/api/trends/route.ts", import.meta.url),
+    "utf8",
+  );
+  const database = await readFile(
+    new URL("../lib/database.ts", import.meta.url),
+    "utf8",
+  );
+  const schema = await readFile(
+    new URL("../runtime/topic-analysis.schema.json", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /sample-research-list/);
   assert.match(source, /内容摘要/);
   assert.match(source, /爆点拆解/);

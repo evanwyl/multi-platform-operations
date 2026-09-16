@@ -5,7 +5,7 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>zh_CN</string>
   <key>CFBundleDisplayName</key>
-  <string>红薯台</string>
+  <string>多平台内容运营</string>
   <key>CFBundleExecutable</key>
   <string>HongShuTai</string>
   <key>CFBundleIconFile</key>
@@ -15,7 +15,7 @@
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>红薯台</string>
+  <string>多平台内容运营</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -27,7 +27,7 @@
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSLocalNetworkUsageDescription</key>
-  <string>用于连接同一局域网内的红薯台团队主机，共享选题、创作、审核和发布任务。</string>
+  <string>用于连接同一局域网内的多平台内容运营团队主机，共享选题、创作、审核和发布任务。</string>
   <key>NSBonjourServices</key>
   <array>
     <string>_hongshutai._tcp</string>

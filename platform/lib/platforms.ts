@@ -20,7 +20,8 @@ export const platforms = {
 } as const;
 
 export type PlatformId = keyof typeof platforms;
-export type ContentType = "xiaohongshu_note" | "zhihu_article" | "zhihu_answer" | "wechat_article";
+export type ContentType =
+  "xiaohongshu_note" | "zhihu_article" | "zhihu_answer" | "wechat_article";
 
 export function isPlatform(value: unknown): value is PlatformId {
   return typeof value === "string" && value in platforms;
@@ -38,5 +39,6 @@ export function contentTypeForPlatform(platform: PlatformId): ContentType {
 }
 
 export function requiresReviewImages(contentType: unknown) {
-  return platformForContentType(contentType) === "xiaohongshu";
+  const platform = platformForContentType(contentType);
+  return platform ? platforms[platform].requiresReviewImages : false;
 }

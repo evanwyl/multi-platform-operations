@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "红薯台｜多平台内容运营中台",
+  title: "多平台内容运营",
   description: "本机部署的多平台内容运营、审核与发布工作台。",
   icons: {
     icon: "/favicon.svg",

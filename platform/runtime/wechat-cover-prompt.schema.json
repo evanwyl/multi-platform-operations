@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["label", "prompt"],
+  "properties": {
+    "label": { "type": "string", "maxLength": 20 },
+    "prompt": { "type": "string", "minLength": 40, "maxLength": 1200 }
+  }
+}
