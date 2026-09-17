@@ -36,9 +36,9 @@ npm audit --audit-level=high
 
 贡献代码前请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。第三方组件及许可证见 [platform/THIRD_PARTY_NOTICES.md](./platform/THIRD_PARTY_NOTICES.md)。
 
-## 许可证状态
+## 许可证
 
-仓库目前公开可见，但项目许可证仍待维护者最终选择。在根目录正式加入 `LICENSE` 之前，不应将“可查看源代码”等同于已获得复制、修改或再分发授权。
+项目采用 [Apache License 2.0](./LICENSE) 开源。你可以使用、修改和分发代码，包括商业用途，但必须遵守许可证中的版权、专利、声明保留及修改标注要求。第三方组件继续适用各自的许可证。
 
 ## 重要边界
 
