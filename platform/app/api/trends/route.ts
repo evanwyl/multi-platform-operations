@@ -3,6 +3,7 @@ import { audit, database, ensureDatabase } from "../../../lib/database";
 import { callMcpTool } from "../../../lib/xhs-mcp";
 import { can, forbidden, roleGroups } from "../../../lib/permissions";
 import { managerFetch } from "../../../lib/runtime-client";
+import { accessibleAccountIds, canAccessAccount } from "../../../lib/account-access";
 
 type Settings = {
   account_id: string | null; target_account_id: string | null; keywords: string; exclude_keywords: string;
@@ -161,6 +162,7 @@ export async function GET(request: Request) {
     db.prepare("SELECT id,name,status,xhs_user_id,xhs_nickname,persona,audience,profile_bio,content_pillars,strategy_keywords,excluded_topics FROM accounts WHERE is_demo=0 ORDER BY updated_at").all<DbRow>(),
   ]);
   const contentType = settings?.content_type || "image";
+  const allowedAccountIds = await accessibleAccountIds(db, user);
   const visibleSamples = samples.results.filter((sample) => contentType === "all" || (contentType === "video" ? sample.note_type === "video" : sample.note_type === "normal"));
   return Response.json({
     settings: settings ? { ...settings, keywords: parseList(settings.keywords), exclude_keywords: parseList(settings.exclude_keywords) } : null,
@@ -170,8 +172,8 @@ export async function GET(request: Request) {
       sample_hooks: parseList(String(sample.sample_hooks || "[]")),
       sample_structure: parseList(String(sample.sample_structure || "[]")),
       reusable_directions: parseList(String(sample.reusable_directions || "[]")),
-    })), scans: scans.results.map((scan) => ({ ...scan, keywords: parseList(String(scan.keywords)), completed_keywords: parseList(String(scan.completed_keywords)) })),
-    accounts: accounts.results.map((account) => ({ ...account,
+    })), scans: scans.results.filter((scan) => !allowedAccountIds || (allowedAccountIds.has(String(scan.account_id)) && (!scan.target_account_id || allowedAccountIds.has(String(scan.target_account_id))))).map((scan) => ({ ...scan, keywords: parseList(String(scan.keywords)), completed_keywords: parseList(String(scan.completed_keywords)) })),
+    accounts: accounts.results.filter((account) => !allowedAccountIds || allowedAccountIds.has(String(account.id))).map((account) => ({ ...account,
       content_pillars: parseList(String(account.content_pillars || "[]")), strategy_keywords: parseList(String(account.strategy_keywords || "[]")), excluded_topics: parseList(String(account.excluded_topics || "[]")),
     })),
   });
@@ -201,6 +203,8 @@ export async function POST(request: Request) {
     const target = await db.prepare(`SELECT id,name,persona,audience,profile_bio,content_pillars,strategy_keywords,excluded_topics FROM accounts WHERE id=? AND is_demo=0`)
       .bind(targetAccountId).first<Account>();
     if (!target) return Response.json({ error: "请先选择本次研究服务的目标内容账号" }, { status: 400 });
+    if (!(await canAccessAccount(db, user, target.id)) || !(await canAccessAccount(db, user, settings.account_id)))
+      return forbidden("你没有所选账号的操作权限");
     if (!String(target.persona || "").trim() || !String(target.audience || "").trim()) return Response.json({ error: `请先到账号中心完善“${target.name}”的账号定位和目标受众` }, { status: 409 });
     const pillars = parseList(String(target.content_pillars || "[]"));
     const strategyKeywords = parseList(String(target.strategy_keywords || "[]"));
@@ -262,6 +266,7 @@ export async function POST(request: Request) {
     }
     const settings = await getSettings();
     if (!settings?.account_id) return Response.json({ error: "请先设置主采集账号" }, { status: 409 });
+    if (!(await canAccessAccount(db, user, settings.account_id))) return forbidden("你没有主采集账号的操作权限");
     const latest = await db.prepare(`SELECT id,status,started_at FROM trend_scans
       WHERE account_id=? AND status IN ('completed','analyzed') ORDER BY started_at DESC LIMIT 1`)
       .bind(settings.account_id).first<{ id: string; status: string; started_at: string }>();
@@ -280,6 +285,7 @@ export async function POST(request: Request) {
     const scanId = String(data.scan_id ?? "");
     const scan = scanId ? await db.prepare("SELECT id,account_id,started_at,status FROM trend_scans WHERE id=?").bind(scanId)
       .first<{ id: string; account_id: string; started_at: string; status: string }>() : null;
+    if (scan && !(await canAccessAccount(db, user, scan.account_id))) return forbidden("你没有该采集账号的操作权限");
     if (scan && !["cancelled", "failed"].includes(scan.status)) {
       await db.batch([
         db.prepare("UPDATE trend_scans SET status='cancelled',error='用户已停止任务',completed_at=? WHERE id=?").bind(nowIso, scan.id),
@@ -303,6 +309,8 @@ export async function POST(request: Request) {
     if (!targetAccount?.persona?.trim() || !targetAccount.audience?.trim()) return Response.json({ error: "目标内容账号定位不完整，请重新生成搜索计划" }, { status: 409 });
     const account = await db.prepare("SELECT id,name,status,xhs_user_id,xhs_nickname FROM accounts WHERE id=? AND is_demo=0").bind(settings.account_id).first<Account>();
     if (!account) return Response.json({ error: "主采集账号记录不存在" }, { status: 409 });
+    if (!(await canAccessAccount(db, user, account.id)) || !(await canAccessAccount(db, user, targetAccount.id)))
+      return forbidden("你没有所选账号的操作权限");
     if (!account.xhs_user_id) return Response.json({ error: `${account.name} 尚未完成首次扫码和唯一身份绑定` }, { status: 409 });
     const recoverable = await db.prepare(`SELECT id,keywords,completed_keywords FROM trend_scans
       WHERE target_account_id=? AND request_text=? AND status='failed' AND error IN ('Codex 分析格式未配置','AI 结构化输出格式未配置')

@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import net from "node:net";
+import { unsafeArchiveEntry } from "../runtime/safe-path.mjs";
 
 const appRoot = resolve(
   process.env.HONGSHUTAI_APP_ROOT || resolve(import.meta.dirname, ".."),
@@ -54,11 +55,7 @@ if ((await portOpen(managerPort)) || (await portOpen(workerPort))) {
 const listing = spawnSync("tar", ["-tzf", archive], { encoding: "utf8" });
 if (listing.status !== 0) throw new Error("备份包损坏或格式无法识别");
 const entries = listing.stdout.split("\n").filter(Boolean);
-if (
-  entries.some(
-    (entry) => entry.startsWith("/") || entry.split("/").includes(".."),
-  )
-)
+if (entries.some(unsafeArchiveEntry))
   throw new Error("备份包包含不安全路径，已拒绝恢复");
 
 const staging = mkdtempSync(join(tmpdir(), "hongshutai-restore-"));

@@ -39,8 +39,33 @@ function withinTimeRange(value: string, range: string) {
 function safePublicUrl(raw: string) {
   const url = new URL(raw);
   const host = url.hostname.toLowerCase();
-  if (!["http:", "https:"].includes(url.protocol) || host === "localhost" || host === "::1" || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) throw new Error("地址不是公开网页");
+  if (
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username || url.password ||
+    (url.port && !["80", "443"].includes(url.port)) ||
+    host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") ||
+    /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) || host.includes(":")
+  ) throw new Error("地址不是公开网页");
   return url;
+}
+
+async function fetchPublicHtml(rawUrl: string) {
+  let url = safePublicUrl(rawUrl);
+  for (let redirects = 0; redirects <= 5; redirects += 1) {
+    const response = await fetch(url, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(20_000),
+      headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140 Safari/537.36" },
+    });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get("location");
+      if (!location) throw new Error("网页重定向地址无效");
+      url = safePublicUrl(new URL(location, url).toString());
+      continue;
+    }
+    return { response, url };
+  }
+  throw new Error("网页重定向次数过多");
 }
 
 function decode(text: string) {
@@ -97,10 +122,8 @@ function articleText(html: string, host = "") {
 }
 
 async function fetchArticle(rawUrl: string) {
-  const url = safePublicUrl(rawUrl);
-  const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(20_000), headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140 Safari/537.36" } });
+  const { response, url } = await fetchPublicHtml(rawUrl);
   if (!response.ok) throw new Error(`网页返回 ${response.status}`);
-  safePublicUrl(response.url);
   const type = response.headers.get("content-type") || "";
   if (!type.includes("html")) throw new Error("搜索结果不是文章网页");
   const html = (await response.text()).slice(0, 2_000_000);

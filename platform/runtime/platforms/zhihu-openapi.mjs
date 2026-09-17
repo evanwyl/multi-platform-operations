@@ -1,6 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
+import { resolveChildPath } from "../safe-path.mjs";
 
 function validAccountId(value) {
   return typeof value === "string" && /^[a-zA-Z0-9_-]{8,100}$/.test(value);
@@ -8,8 +9,9 @@ function validAccountId(value) {
 
 function credentialPath(root, accountId) {
   if (!validAccountId(accountId)) throw Object.assign(new Error("知乎账号标识不合法"), { status: 400 });
-  const accountRoot = resolve(root, accountId);
-  if (!accountRoot.startsWith(`${resolve(root)}/`)) throw Object.assign(new Error("知乎账号路径不合法"), { status: 400 });
+  let accountRoot;
+  try { accountRoot = resolveChildPath(root, accountId); }
+  catch { throw Object.assign(new Error("知乎账号路径不合法"), { status: 400 }); }
   return { accountRoot, path: join(accountRoot, "openapi.json") };
 }
 

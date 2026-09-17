@@ -7,6 +7,7 @@ import {
 } from "../../../lib/database";
 import { can, forbidden, roleGroups } from "../../../lib/permissions";
 import { managerFetch } from "../../../lib/runtime-client";
+import { canAccessAccount } from "../../../lib/account-access";
 
 type ImagePrompt = { label: string; prompt: string };
 
@@ -21,6 +22,7 @@ type CreativeDraft = {
 
 type ClaimContext = {
   id: string;
+  account_id: string;
   owner_id: string;
   status: string;
   title: string;
@@ -314,6 +316,8 @@ export async function GET(request: Request) {
   const claim = await claimContext(id);
   if (!claim)
     return Response.json({ error: "内容任务不存在" }, { status: 404 });
+  if (!(await canAccessAccount(database(), user, claim.account_id)))
+    return forbidden("你没有该账号的操作权限");
   if (!canView(user, claim))
     return Response.json(
       { error: "当前账号无法查看这个团队任务" },
@@ -350,6 +354,8 @@ export async function POST(request: Request) {
   let claim = await claimContext(id);
   if (!claim)
     return Response.json({ error: "内容任务不存在" }, { status: 404 });
+  if (!(await canAccessAccount(database(), user, claim.account_id)))
+    return forbidden("你没有该账号的操作权限");
   if (!canEdit(user, claim))
     return Response.json(
       { error: "当前账号无法编辑这个团队任务" },

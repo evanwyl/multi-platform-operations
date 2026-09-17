@@ -6,7 +6,10 @@ const MAX_LOGIN_FAILURES = 5;
 const LOGIN_BLOCK_MS = 15 * 60 * 1000;
 
 function loginAttemptKey(request: Request, username: string) {
-  const address = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+  const trustProxy = process.env.HONGSHUTAI_TRUST_PROXY_HEADERS === "1";
+  const address = trustProxy
+    ? request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "proxy"
+    : "local";
   return `${address}:${username}`;
 }
 

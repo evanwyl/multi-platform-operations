@@ -27,7 +27,7 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 
-type User = { id: string; name: string; username: string; roles: string[] };
+type User = { id: string; name: string; username: string; roles: string[]; account_ids?: string[] };
 type PlatformId = "xiaohongshu" | "zhihu" | "wechat";
 type Account = {
   id: string;
@@ -1133,7 +1133,7 @@ function AccountWorkspace({
     (claim) => claim.status === "review",
   ).length;
   const publishedCount = claims.filter(
-    (claim) => claim.status === "published",
+    (claim) => ["published", "drafted"].includes(claim.status),
   ).length;
   const accountIdentifier = xhs
     ? account.xhs_red_id || account.xhs_user_id || account.external_user_id
@@ -1457,7 +1457,7 @@ function Dashboard({
       ["writing", "revision"].includes(claim.status),
   ).length;
   const published = data.claims.filter(
-    (claim) => claim.status === "published",
+    (claim) => ["published", "drafted"].includes(claim.status),
   ).length;
   const visibleClaims = data.claims.slice(0, 5);
   return (
@@ -3349,8 +3349,8 @@ function Topics({
     },
     {
       id: "published",
-      label: "已发布",
-      matches: (topic: Topic) => topic.claim_status === "published",
+      label: "已完成",
+      matches: (topic: Topic) => ["published", "drafted"].includes(topic.claim_status || ""),
     },
   ];
   const activeGroup =
@@ -4222,7 +4222,7 @@ function Content({
               ),
             ).length;
             const publishedCount = claims.filter(
-              (claim) => claim.status === "published",
+              (claim) => ["published", "drafted"].includes(claim.status),
             ).length;
             return (
               <button
@@ -4417,6 +4417,8 @@ function Content({
                   ? "内容正在审核中心等待处理。"
                   : selected.status === "published"
                     ? "内容已经发布，可到发布列表查看记录。"
+                    : selected.status === "drafted"
+                      ? "内容已经写入公众号草稿箱，可到完成记录查看。"
                     : "内容已经进入发布流程，请到发布列表继续处理。"}
               </span>
             </div>
@@ -5305,7 +5307,7 @@ function Publish({
   const pending = data.claims.filter((claim) =>
     ["approved", "queued", "publishing", "failed"].includes(claim.status),
   );
-  const published = data.claims.filter((claim) => claim.status === "published");
+  const published = data.claims.filter((claim) => ["published", "drafted"].includes(claim.status));
   const items = filter === "pending" ? pending : published;
 
   async function previewWechatLayout(claim: Claim) {
@@ -5355,7 +5357,7 @@ function Publish({
         body: JSON.stringify({ action: "publish_now", claim_id: claim.id }),
       });
       await reload();
-      notify(`内容已通过${platform}发布服务发布成功`);
+      notify(isWechatClaim(claim) ? "内容已写入公众号草稿箱并回读核验" : `内容已通过${platform}发布服务发布成功`);
     } catch (error) {
       await reload();
       notify(error instanceof Error ? error.message : "发布失败");
@@ -5461,7 +5463,7 @@ function Publish({
               className={filter === "published" ? "active" : ""}
               onClick={() => setFilter("published")}
             >
-              已发布 {published.length}
+              完成记录 {published.length}
             </button>
           </div>
         </div>
@@ -6196,7 +6198,7 @@ function AccountOverview({
     ["approved", "queued", "publishing"].includes(claim.status),
   ).length;
   const published = claims.filter(
-    (claim) => claim.status === "published",
+    (claim) => claim.status === "published" || (account.platform === "wechat" && claim.status === "drafted"),
   ).length;
   const value = (item?: string | number | null) =>
     item === undefined || item === null || item === "" ? "暂无" : item;
@@ -6500,6 +6502,7 @@ function Settings({
   busy: boolean;
 }) {
   const [adding, setAdding] = useState(false);
+  const [accessMember, setAccessMember] = useState<User | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState(data.ai_settings.baseUrl);
   const [model, setModel] = useState(data.ai_settings.model);
@@ -6547,13 +6550,20 @@ function Settings({
               <>
                 <span className="soft-badge">启用</span>
                 {isAdmin ? (
-                  <button
-                    className="danger-outline member-delete"
-                    disabled={busy}
-                    onClick={() => removeMember(member)}
-                  >
-                    删除成员
-                  </button>
+                  <>
+                    {!member.roles.includes("admin") ? (
+                      <button className="outline" disabled={busy} onClick={() => setAccessMember(member)}>
+                        账号权限
+                      </button>
+                    ) : null}
+                    <button
+                      className="danger-outline member-delete"
+                      disabled={busy}
+                      onClick={() => removeMember(member)}
+                    >
+                      删除成员
+                    </button>
+                  </>
                 ) : null}
               </>
             )}
@@ -6722,6 +6732,7 @@ function Settings({
                   username: form.get("username"),
                   password: form.get("password"),
                   role: form.get("role"),
+                  account_ids: form.getAll("account_ids"),
                 },
                 "团队成员已添加",
               );
@@ -6755,6 +6766,15 @@ function Settings({
                 <option value="readonly">只读成员</option>
               </select>
             </label>
+            <fieldset>
+              <legend>可管理账号</legend>
+              {data.accounts.map((account) => (
+                <label key={account.id}>
+                  <input type="checkbox" name="account_ids" value={account.id} defaultChecked />
+                  {account.name}
+                </label>
+              ))}
+            </fieldset>
             <div className="modal-actions">
               <button
                 type="button"
@@ -6766,6 +6786,31 @@ function Settings({
               <button className="primary" disabled={busy}>
                 创建账号
               </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+      {accessMember ? (
+        <div className="modal-backdrop">
+          <form className="modal" onSubmit={(event) => {
+            event.preventDefault();
+            const form = new FormData(event.currentTarget);
+            action({ action: "set_user_accounts", user_id: accessMember.id, account_ids: form.getAll("account_ids") }, "账号权限已更新");
+            setAccessMember(null);
+          }}>
+            <span className="section-kicker">账号权限</span>
+            <h2>{accessMember.name} 可管理的账号</h2>
+            <fieldset>
+              {data.accounts.map((account) => (
+                <label key={account.id}>
+                  <input type="checkbox" name="account_ids" value={account.id} defaultChecked={accessMember.account_ids?.includes(account.id)} />
+                  {account.name}
+                </label>
+              ))}
+            </fieldset>
+            <div className="modal-actions">
+              <button type="button" className="ghost" onClick={() => setAccessMember(null)}>取消</button>
+              <button className="primary" disabled={busy}>保存权限</button>
             </div>
           </form>
         </div>
@@ -6839,7 +6884,7 @@ function Empty({ title, text }: { title: string; text: string }) {
 function toneFor(status: string) {
   if (["review"].includes(status)) return "amber";
   if (["writing"].includes(status)) return "blue";
-  if (["approved", "queued", "published"].includes(status)) return "violet";
+  if (["approved", "queued", "drafted", "published"].includes(status)) return "violet";
   return "rose";
 }
 function contentStageLabel(claim: Claim) {
@@ -6849,6 +6894,7 @@ function contentStageLabel(claim: Claim) {
   if (claim.status === "review") return "待审核";
   if (["approved", "queued"].includes(claim.status)) return "待发布";
   if (claim.status === "publishing") return "发布中";
+  if (claim.status === "drafted") return "已入公众号草稿箱";
   if (claim.status === "published") return "已发布";
   if (claim.status === "failed") return "发布失败";
   return claim.status_label;
