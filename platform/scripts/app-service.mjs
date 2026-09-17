@@ -32,7 +32,13 @@ const environment = {
   HONGSHUTAI_APP_ROOT: appRoot,
   HONGSHUTAI_DATA_ROOT: dataRoot,
   RUNTIME_MANAGER_TOKEN: token,
-  XHS_MCP_BINARY: resolve(appRoot, "runtime/bin/xiaohongshu-mcp-darwin-arm64"),
+  XHS_MCP_BINARY: resolve(
+    appRoot,
+    "runtime/bin",
+    process.platform === "win32"
+      ? "xiaohongshu-mcp-windows-amd64.exe"
+      : "xiaohongshu-mcp-darwin-arm64",
+  ),
   WRANGLER_SEND_METRICS: "false",
 };
 const teamMode = process.env.HONGSHUTAI_TEAM_MODE || "standalone";

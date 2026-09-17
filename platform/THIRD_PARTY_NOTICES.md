@@ -8,6 +8,7 @@
 - 固定版本：v2.5.0
 - 固定提交：6583124dfda92312b6bc19a042a6acfae63fe498
 - macOS arm64 二进制 SHA-256：`3e32e08c3403d22a5efef2f06aa52630b458819fc54474cba23e896c7092c38e`
+- Windows amd64 二进制 SHA-256：`3578c9fcf3e7be0b79564aeceef8c4f38e0072d9357ca1f911ee14cd37bd454c`
 - 许可证：Apache License 2.0
 - Copyright 2025 xpzouying
 
@@ -56,4 +57,13 @@ TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
 
 ## Node.js
 
-未签名 macOS App 内置构建时使用的官方 Node.js arm64 运行时，买家无需另行安装 Node.js。完整 Node.js 许可证随 App 保存为 `Contents/Resources/runtime/LICENSE.Node.txt`；运行时版本记录在同目录的 `NODE_VERSION.txt`。
+macOS App 与 Windows 便携包内置构建时使用的官方 Node.js 运行时，用户无需另行安装 Node.js。完整 Node.js 许可证和运行时版本记录会随包分发。
+
+## Microsoft Edge WebView2
+
+- 项目：https://developer.microsoft.com/microsoft-edge/webview2/
+- NuGet 包：Microsoft.Web.WebView2 1.0.4191.47
+- 用途：Windows 原生窗口、Cookie 隔离和网页交互
+- 许可证：随 NuGet 包提供的 Microsoft.Web.WebView2 license terms
+
+Windows 启动器分发 WebView2 SDK loader；网页渲染依赖系统中的 Microsoft Edge WebView2 Evergreen Runtime。构建产物必须保留 NuGet 包附带的许可证文件。

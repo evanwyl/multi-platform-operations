@@ -61,7 +61,11 @@ test("uses an isolated persistent Chromium profile for default Zhihu login", asy
   assert.match(browser, /launchPersistentContext/);
   assert.match(browser, /zhihu-profile/);
   assert.match(browser, /z_c0/);
-  assert.match(browser, /\[configured, \.\.\.browserCandidates, bundled\]/);
+  assert.match(
+    browser,
+    /\[configured, \.\.\.browserCandidates, bundled, windowsBundled\]/,
+  );
+  assert.match(browser, /process\.platform === "win32" \? "Control\+A" : "Meta\+A"/);
   assert.match(browser, /for \(const executablePath of executables\)/);
   assert.match(browser, /catch \(error\) \{ lastError = error; \}/);
   assert.match(manager, /\/zhihu\/browser-login/);

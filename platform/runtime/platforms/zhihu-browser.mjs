@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 
@@ -26,7 +26,23 @@ function profilePath(platformAccountRoot, accountId) {
 function browserExecutables(appRoot) {
   const configured = String(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || "").trim();
   const bundled = resolve(appRoot, "runtime/bin/chromium/Chromium.app/Contents/MacOS/Chromium");
-  return [...new Set([configured, ...browserCandidates, bundled].filter((candidate) => candidate && existsSync(candidate)))];
+  const windowsRoot = resolve(appRoot, "runtime/bin/chromium");
+  const windowsBundled = process.platform === "win32" ? findExecutable(windowsRoot, new Set(["chrome.exe", "headless_shell.exe"])) : "";
+  return [...new Set([configured, ...browserCandidates, bundled, windowsBundled].filter((candidate) => candidate && existsSync(candidate)))];
+}
+
+function findExecutable(root, names) {
+  if (!existsSync(root)) return "";
+  const pending = [root];
+  while (pending.length) {
+    const directory = pending.shift();
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = resolve(directory, entry.name);
+      if (entry.isFile() && names.has(entry.name.toLowerCase())) return path;
+      if (entry.isDirectory()) pending.push(path);
+    }
+  }
+  return "";
 }
 
 async function launchContext(platformAccountRoot, appRoot, accountId, headless) {
@@ -131,7 +147,7 @@ export async function publishZhihuArticleBrowser(platformAccountRoot, appRoot, p
     const editor = await firstVisible(page, [".public-DraftEditor-content[contenteditable='true']", ".public-DraftEditor-content", "[contenteditable='true']"]);
     if (!editor) throw new Error("知乎专栏页面没有找到正文编辑器，页面结构可能已更新");
     await editor.click();
-    await page.keyboard.press("Meta+A");
+    await page.keyboard.press(process.platform === "win32" ? "Control+A" : "Meta+A");
     await page.keyboard.insertText(body);
     const inserted = String(await editor.innerText().catch(() => "")).trim();
     if (inserted.length < Math.min(10, body.length)) throw new Error("知乎正文没有成功写入编辑器，本次尚未点击发布");

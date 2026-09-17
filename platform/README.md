@@ -1,11 +1,14 @@
 # 多平台内容运营 Local
 
-多平台内容运营是运行在买家自己 Mac 上、以团队协作为核心的 AI 内容运营平台。小红书、知乎和微信公众号使用独立账号与发布适配器，共享选题、创作、审核和发布工作流。当前版本定位为 **macOS Apple Silicon 付费测试版**，不是 SaaS：业务数据库、账号 Cookie、AI Key 和发布素材都保存在本机。
+多平台内容运营是本机部署、以团队协作为核心的 AI 内容运营平台。小红书、知乎和微信公众号使用独立账号与发布适配器，共享选题、创作、审核和发布工作流。项目不是 SaaS：业务数据库、账号 Cookie、AI Key 和发布素材都保存在团队主机本地。
+
+> 仓库当前已公开，但根目录许可证仍待维护者最终选择。在 `LICENSE` 合并前，代码属于“公开可见”，尚未授予完整的开源复制、修改与分发权利。
 
 ## 支持范围
 
-- 当前只交付和测试 Apple Silicon Mac（M1/M2/M3/M4 系列）
-- 买家使用自己的小红书账号、AI API Key 和网络环境
+- macOS：Apple Silicon（M1/M2/M3/M4 系列），原生 WKWebView 应用壳
+- Windows：Windows 10/11 x64 便携版，WinForms + WebView2 应用壳
+- 使用者提供自己的平台账号、AI API Key 和网络环境
 - 支持选题、认领、AI 创作、Humanizer 去 AI 味、审核、排队和人工触发发布
 - 小红书：保留既有 MCP 爆款搜索、扫码身份绑定、图文审核与人工发布链路
 - 知乎 V1：支持人工创建知乎选题、知乎专栏 AI 创作和文本审核；正式发布、问题池与回答发布尚未交付
@@ -13,6 +16,8 @@
 - 小红书发布依赖非官方浏览器自动化，平台页面变化、风控或账号状态都可能导致失败；不得承诺“永久可用”“绝不封号”或“官方接口”
 
 ## 未签名安装包
+
+### macOS Apple Silicon
 
 ```bash
 npm run package:unsigned
@@ -25,6 +30,22 @@ App 内置 Apple Silicon Node.js、小红书 MCP 和本地 Worker 运行环境�
 全新安装第一次打开时必须先选择“独立使用”“创建团队主机”或“加入已有团队”，选择前不会启动后台服务。独立模式的数据只在本机；团队主机开放局域网业务服务并生成团队连接码；团队成员填写主机地址与连接码，只连接主机，不启动本地 Worker、数据库、运行管理器或 MCP。主机模式会直接显示局域网地址和连接码，可用“复制连接信息”发给可信成员。运行管理器、小红书 MCP、Cookie 与 AI Key 始终只保存在团队主机，不向局域网直接开放。当前局域网模式用于可信家庭或办公室网络，不应在公共 Wi-Fi 使用。
 
 macOS 15 及以上会在成员首次连接时询问是否允许多平台内容运营访问本地网络，请选择“允许”。如果曾拒绝，可从应用菜单选择“打开本地网络权限设置…”，在“隐私与安全性 → 本地网络”中重新开启。未授权时成员无法访问局域网主机，但成员模式仍不会启动任何本地后台。
+
+### Windows 10/11 x64
+
+Windows 包必须在 Windows x64 环境构建：
+
+```powershell
+npm ci
+npx playwright-core install chromium
+npm run package:windows
+```
+
+产物位于 `outputs/`，包括 `windows-x64-portable.zip` 和对应 SHA-256。便携包内置 Node.js、Windows x64 小红书 MCP、Chromium、本地 Worker 和自包含 .NET 8 启动器，不要求用户安装 Node.js 或 .NET。必须完整解压后运行“多平台内容运营.exe”；关闭窗口后应用仍驻留系统托盘，从托盘菜单退出才会停止服务。
+
+Windows 数据保存在 `%LOCALAPPDATA%\多平台内容运营`。团队主机模式首次触发 Windows 防火墙提示时，只应允许“专用网络”，不要允许公共网络。Windows 11 通常已经包含 WebView2 Runtime；缺失时启动器会明确提示安装。
+
+当前 Windows ZIP 尚未使用 Authenticode 代码签名，SmartScreen 可能显示“未知发布者”。只应从项目官方 GitHub Release 下载并核对 SHA-256；对外正式发布前建议配置可信代码签名证书。
 
 ## 开发与本机启动
 
@@ -62,7 +83,8 @@ npm start
 ## 本地数据与安全
 
 - 开发源码运行时：保存在项目目录的 `.wrangler/` 和 `runtime/`
-- 安装版运行时：为兼容旧版本，仍保存在 `~/Library/Application Support/红薯台/`
+- macOS 安装版：为兼容旧版本，仍保存在 `~/Library/Application Support/红薯台/`
+- Windows 安装版：保存在 `%LOCALAPPDATA%\多平台内容运营\`
 - App 内的 `runtime-cache/` 只是可重新生成的运行缓存，买家数据仍在同级数据库及 runtime 数据目录
 
 这些目录均已从 Git 和源码包排除。运行管理器会将敏感目录权限收紧为 `0700`、Cookie 文件收紧为 `0600`。不要把上述目录、备份文件或截图中的二维码发给他人。
@@ -84,7 +106,7 @@ npm run restore -- /绝对路径/multi-platform-content-日期.tar.gz --confirm
 
 ## 发布依赖与许可证
 
-`npm run prepare:runtime` 固定下载 `xiaohongshu-mcp v2.5.0` 的官方 macOS arm64 Release，并验证 SHA-256；哈希不一致时会拒绝写入。第三方组件及许可证见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。最终安装包必须同时附带该文件和完整许可证文本。
+`npm run prepare:runtime` 会根据构建系统下载 `xiaohongshu-mcp v2.5.0` 的官方 macOS arm64 或 Windows amd64 Release，并验证固定 SHA-256；哈希不一致时会拒绝写入。第三方组件及许可证见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。最终安装包必须同时附带该文件和完整许可证文本。
 
 ## 质量门禁
 
@@ -92,7 +114,9 @@ npm run restore -- /绝对路径/multi-platform-content-日期.tar.gz --confirm
 npm run verify
 ```
 
-该命令依次执行 ESLint、TypeScript、生产构建和全部自动化测试。当前交付路线明确为未签名版，因此不做 Apple Developer 签名和公证；仍必须在全新 Mac 上完成安装、升级和卸载测试。逐项要求见 [RELEASE_CHECKLIST.md](./docs/RELEASE_CHECKLIST.md)。
+该命令依次执行 ESLint、TypeScript、生产构建和全部自动化测试。GitHub Actions 会执行相同质量门禁，并在 Windows runner 构建 x64 便携包作为工作流产物。两种系统的公开 Release 都必须在对应全新机器上完成安装、升级、卸载和发布链路测试。逐项要求见 [RELEASE_CHECKLIST.md](./docs/RELEASE_CHECKLIST.md)。
+
+参与贡献前请阅读仓库根目录的 [CONTRIBUTING.md](../CONTRIBUTING.md) 和 [SECURITY.md](../SECURITY.md)。
 
 ## 当前边界
 

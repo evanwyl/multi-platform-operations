@@ -53,10 +53,11 @@ const publishAssetRoot = resolve(dataRoot, "runtime/publish-assets");
 const trendCoverRoot = resolve(dataRoot, "runtime/trend-covers");
 const configRoot = resolve(dataRoot, "runtime/config");
 const aiConfigPath = join(configRoot, "ai.json");
-const bundledXhsBinary = resolve(
-  appRoot,
-  "runtime/bin/xiaohongshu-mcp-darwin-arm64",
-);
+const bundledXhsName =
+  process.platform === "win32"
+    ? "xiaohongshu-mcp-windows-amd64.exe"
+    : "xiaohongshu-mcp-darwin-arm64";
+const bundledXhsBinary = resolve(appRoot, "runtime/bin", bundledXhsName);
 const legacyXhsBinary = join(
   homedir(),
   ".hermes/services/xiaohongshu-mcp/bin/xiaohongshu-mcp-darwin-arm64",
