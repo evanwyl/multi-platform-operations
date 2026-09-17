@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { resolve } from "node:path";
 
 const localEnv = {
   ...process.env,
@@ -7,8 +8,8 @@ const localEnv = {
 };
 
 const children = [
-  spawn("npm", ["run", "runtime"], { stdio: "inherit", env: localEnv }),
-  spawn("npm", ["run", "dev:web"], { stdio: "inherit", env: localEnv }),
+  spawn(process.execPath, [resolve(import.meta.dirname, "../runtime/manager.mjs")], { stdio: "inherit", env: localEnv }),
+  spawn(process.execPath, [resolve(import.meta.dirname, "run-local-cli.mjs"), "vinext", "dev", "--hostname", "127.0.0.1"], { stdio: "inherit", env: localEnv }),
 ];
 
 let closing = false;
