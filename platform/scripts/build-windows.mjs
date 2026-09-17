@@ -25,6 +25,10 @@ const packageRoot = resolve(outputRoot, packageName);
 const packagedApp = resolve(packageRoot, "resources/app");
 const packagedRuntime = resolve(packageRoot, "resources/runtime");
 const zipPath = resolve(outputRoot, `${packageName}.zip`);
+const npmCli = process.env.npm_execpath;
+if (!npmCli || !existsSync(npmCli)) {
+  throw new Error("找不到当前 npm CLI，必须通过 npm run package:windows 启动构建");
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -150,8 +154,8 @@ if (process.platform !== "win32" || process.arch !== "x64") {
   throw new Error("Windows 安装包必须在 Windows x64 环境构建");
 }
 
-run("npm.cmd", ["run", "build"]);
-run("npm.cmd", ["run", "prepare:runtime"]);
+run(process.execPath, [npmCli, "run", "build"]);
+run(process.execPath, [npmCli, "run", "prepare:runtime"]);
 
 mkdirSync(outputRoot, { recursive: true });
 mkdirSync(archiveRoot, { recursive: true });
@@ -208,9 +212,9 @@ writeFileSync(
   `${JSON.stringify(runtimePackage, null, 2)}\n`,
 );
 run(
-  "npm.cmd",
-  ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"],
-  { cwd: packagedApp },
+  process.execPath,
+  [npmCli, "install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"],
+  { cwd: packagedApp, env: { ...process.env, npm_execpath: npmCli } },
 );
 
 copyFileSync(process.execPath, resolve(packagedRuntime, "node.exe"));
