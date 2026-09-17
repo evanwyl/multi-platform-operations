@@ -287,15 +287,29 @@ writeFileSync(
 );
 
 assertNoCustomerData(packageRoot);
-run("powershell.exe", [
-  "-NoLogo",
-  "-NoProfile",
-  "-NonInteractive",
-  "-Command",
-  "Compress-Archive -LiteralPath $args[0] -DestinationPath $args[1] -CompressionLevel Optimal -Force",
-  packageRoot,
-  zipPath,
-]);
+const archiveScript = resolve(outputRoot, ".compress-windows-package.ps1");
+writeFileSync(
+  archiveScript,
+  [
+    "param([Parameter(Mandatory=$true)][string]$Source, [Parameter(Mandatory=$true)][string]$Destination)",
+    "Compress-Archive -LiteralPath $Source -DestinationPath $Destination -CompressionLevel Optimal -Force",
+  ].join("\r\n"),
+);
+try {
+  run("powershell.exe", [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    archiveScript,
+    packageRoot,
+    zipPath,
+  ]);
+} finally {
+  rmSync(archiveScript, { force: true });
+}
 
 const hash = createHash("sha256").update(readFileSync(zipPath)).digest("hex");
 writeFileSync(`${zipPath}.sha256`, `${hash}  ${basename(zipPath)}\n`);
