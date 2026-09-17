@@ -12,6 +12,7 @@ import {
   isPlatform,
   requiresReviewImages,
 } from "../../../lib/platforms";
+import { accessibleAccountIds, canAccessAccount } from "../../../lib/account-access";
 
 const statusLabels: Record<string, string> = {
   writing: "创作中",
@@ -20,6 +21,7 @@ const statusLabels: Record<string, string> = {
   approved: "待发布",
   queued: "发布队列",
   publishing: "发布中",
+  drafted: "已入公众号草稿箱",
   published: "已发布",
   failed: "发布失败",
 };
@@ -99,7 +101,7 @@ export async function GET(request: Request) {
       s.liked_count,s.collected_count,s.comment_count,s.heat_score,s.first_seen_at AS captured_at,
       s.published_at AS note_published_at,s.feed_id AS note_id,s.processing_status AS source_processing_status,
       CASE WHEN s.processing_status='success' AND s.detail_text!='' THEN 1 ELSE 0 END AS source_detail_verified,
-      latest_claim.status AS claim_status,claim_owner.name AS claim_owner_name
+      latest_claim.status AS claim_status,latest_claim.account_id AS claim_account_id,claim_owner.name AS claim_owner_name
       FROM topics t
       JOIN users u ON u.id=t.created_by
       LEFT JOIN topic_insights i ON i.topic_id=t.id
@@ -137,15 +139,26 @@ export async function GET(request: Request) {
       })),
     ],
   );
+  const allowedAccountIds = await accessibleAccountIds(db, user);
+  const accessRows = await db.prepare("SELECT user_id,account_id FROM user_account_access").all<{ user_id: string; account_id: string }>();
+  const visibleAccounts = allowedAccountIds
+    ? accounts.results.filter((account) => allowedAccountIds.has(String(account.id)))
+    : accounts.results;
+  const visibleClaims = allowedAccountIds
+    ? claims.results.filter((claim) => allowedAccountIds.has(String(claim.account_id)))
+    : claims.results;
+  const visibleTopics = allowedAccountIds
+    ? topics.results.filter((topic) => !topic.claim_account_id || allowedAccountIds.has(String(topic.claim_account_id)))
+    : topics.results;
   return Response.json({
     user: publicUser(user),
-    accounts: accounts.results.map((account) => ({
+    accounts: visibleAccounts.map((account) => ({
       ...account,
       content_pillars: parseTextList(account.content_pillars),
       strategy_keywords: parseTextList(account.strategy_keywords),
       excluded_topics: parseTextList(account.excluded_topics),
     })),
-    topics: topics.results.map((topic) => ({
+    topics: visibleTopics.map((topic) => ({
       ...topic,
       hook_points: topic.hook_points
         ? JSON.parse(String(topic.hook_points))
@@ -157,7 +170,7 @@ export async function GET(request: Request) {
         ? JSON.parse(String(topic.source_feed_ids))
         : [],
     })),
-    claims: claims.results.map((claim) => ({
+    claims: visibleClaims.map((claim) => ({
       ...claim,
       status_label: statusLabels[String(claim.status)] ?? claim.status,
       publish_recoverable:
@@ -175,6 +188,7 @@ export async function GET(request: Request) {
     users: users.results.map((row) => ({
       ...row,
       roles: JSON.parse(String(row.roles)),
+      account_ids: accessRows.results.filter((item) => item.user_id === row.id).map((item) => item.account_id),
     })),
     ai_settings: aiSettings,
   });
@@ -194,6 +208,16 @@ export async function POST(request: Request) {
   const data = (await request.json()) as Record<string, unknown>;
   const action = String(data.action ?? "");
   const now = new Date().toISOString();
+  const claimScopedActions = new Set([
+    "save_wechat_layout", "preview_wechat_layout", "save_draft",
+    "upload_review_images", "submit_review", "review", "queue_publish",
+  ]);
+  if (claimScopedActions.has(action)) {
+    const scopedClaim = await db.prepare("SELECT account_id FROM claims WHERE id=?")
+      .bind(String(data.id ?? "")).first<{ account_id: string }>();
+    if (scopedClaim && !(await canAccessAccount(db, user, scopedClaim.account_id)))
+      return forbidden("你没有该账号的操作权限");
+  }
 
   if (action === "save_wechat_layout" || action === "preview_wechat_layout") {
     const id = String(data.id ?? "");
@@ -464,9 +488,13 @@ export async function POST(request: Request) {
       ? String(data.role)
       : "operator";
     const id = crypto.randomUUID();
+    const requestedAccountIds = cleanTextList(data.account_ids, 20);
+    const availableAccounts = await db.prepare("SELECT id FROM accounts WHERE is_demo=0").all<{ id: string }>();
+    const validAccountIds = (requestedAccountIds.length ? requestedAccountIds : availableAccounts.results.map((item) => item.id))
+      .filter((id) => availableAccounts.results.some((item) => item.id === id));
     try {
-      await db
-        .prepare(
+      await db.batch([
+        db.prepare(
           "INSERT INTO users (id,name,username,password_hash,roles,status,created_at) VALUES (?,?,?,?,?,'active',?)",
         )
         .bind(
@@ -476,13 +504,39 @@ export async function POST(request: Request) {
           await createPasswordHash(password),
           JSON.stringify([role]),
           now,
-        )
-        .run();
+        ),
+        ...validAccountIds.map((accountId) => db.prepare(
+          "INSERT INTO user_account_access (user_id,account_id,created_at) VALUES (?,?,?)",
+        ).bind(id, accountId, now)),
+      ]);
     } catch {
       return Response.json({ error: "用户名已经存在" }, { status: 409 });
     }
     await audit(user.id, "添加团队成员", "user", id, `${name} / ${role}`);
     return Response.json({ ok: true, id }, { status: 201 });
+  }
+
+  if (action === "set_user_accounts") {
+    const roles = JSON.parse(user.roles) as string[];
+    if (!roles.includes("admin")) return forbidden("只有管理员可以分配账号权限");
+    const targetId = String(data.user_id ?? "");
+    const target = await db.prepare("SELECT id,roles FROM users WHERE id=? AND status='active'")
+      .bind(targetId).first<{ id: string; roles: string }>();
+    if (!target) return Response.json({ error: "成员不存在" }, { status: 404 });
+    if ((JSON.parse(target.roles) as string[]).includes("admin"))
+      return Response.json({ error: "管理员默认可以管理全部账号" }, { status: 409 });
+    const requested = cleanTextList(data.account_ids, 20);
+    const valid = requested.length
+      ? await db.prepare(`SELECT id FROM accounts WHERE is_demo=0 AND id IN (${requested.map(() => "?").join(",")})`).bind(...requested).all<{ id: string }>()
+      : { results: [] as Array<{ id: string }> };
+    await db.batch([
+      db.prepare("DELETE FROM user_account_access WHERE user_id=?").bind(target.id),
+      ...valid.results.map((account) => db.prepare(
+        "INSERT INTO user_account_access (user_id,account_id,created_at) VALUES (?,?,?)",
+      ).bind(target.id, account.id, now)),
+    ]);
+    await audit(user.id, "更新成员账号权限", "user", target.id, `${valid.results.length} 个账号`);
+    return Response.json({ ok: true, account_ids: valid.results.map((item) => item.id) });
   }
 
   if (action === "remove_user") {
@@ -511,6 +565,7 @@ export async function POST(request: Request) {
         .prepare("UPDATE users SET status='disabled' WHERE id=?")
         .bind(target.id),
       db.prepare("DELETE FROM sessions WHERE user_id=?").bind(target.id),
+      db.prepare("DELETE FROM user_account_access WHERE user_id=?").bind(target.id),
     ]);
     await audit(
       user.id,
@@ -635,6 +690,8 @@ export async function POST(request: Request) {
       .first<{ id: string; platform: string }>();
     if (!account)
       return Response.json({ error: "发布账号不存在" }, { status: 404 });
+    if (!(await canAccessAccount(db, user, account.id)))
+      return forbidden("你没有该账号的操作权限");
     if (source?.platform && source.platform !== account.platform)
       return Response.json(
         { error: "选题平台与发布账号不一致，请选择同平台账号" },
@@ -642,7 +699,7 @@ export async function POST(request: Request) {
       );
     const existing = await db
       .prepare(
-        "SELECT id FROM claims WHERE topic_id=? AND account_id=? AND status NOT IN ('published','archived')",
+        "SELECT id FROM claims WHERE topic_id=? AND account_id=? AND status NOT IN ('published','drafted','archived')",
       )
       .bind(topicId, accountId)
       .first();
@@ -677,7 +734,7 @@ export async function POST(request: Request) {
     } catch (error) {
       const competingClaim = await db
         .prepare(
-          "SELECT id FROM claims WHERE topic_id=? AND account_id=? AND status NOT IN ('published','archived')",
+          "SELECT id FROM claims WHERE topic_id=? AND account_id=? AND status NOT IN ('published','drafted','archived')",
         )
         .bind(topicId, accountId)
         .first();

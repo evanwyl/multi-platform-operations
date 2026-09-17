@@ -1,8 +1,9 @@
 import { currentUser, rejectCrossSiteMutation } from "../../../lib/auth";
 import { audit, database, ensureDatabase } from "../../../lib/database";
-import { callMcpTool, checkMcpLogin } from "../../../lib/xhs-mcp";
+import { callMcpTool, checkMcpLogin, readMcpIdentity } from "../../../lib/xhs-mcp";
 import { can, forbidden, roleGroups } from "../../../lib/permissions";
 import { managerFetch } from "../../../lib/runtime-client";
+import { canAccessAccount } from "../../../lib/account-access";
 
 type PublishClaim = {
   id: string;
@@ -81,6 +82,8 @@ export async function POST(request: Request) {
     .first<PublishClaim>();
   if (!claim)
     return Response.json({ error: "发布任务不存在" }, { status: 404 });
+  if (!(await canAccessAccount(db, user, claim.account_id)))
+    return forbidden("你没有该账号的操作权限");
 
   const isWechatArticle =
     claim.account_platform === "wechat" &&
@@ -444,6 +447,8 @@ export async function POST(request: Request) {
               (isWechatArticle ? "公众号草稿提交失败" : "知乎发布失败"),
           );
         const publishedAt = new Date().toISOString();
+        const completedStatus = isWechatArticle ? "drafted" : "published";
+        const recordedPublishedAt = isWechatArticle ? null : publishedAt;
         const detail = String(
           payload.detail ||
             (isWechatArticle ? "已写入公众号草稿箱" : "知乎专栏已发布"),
@@ -451,10 +456,11 @@ export async function POST(request: Request) {
         await db.batch([
           db
             .prepare(
-              "UPDATE claims SET status='published',published_at=?,published_url=?,external_content_id=?,publish_error='',updated_at=? WHERE id=? AND status='publishing'",
+              "UPDATE claims SET status=?,published_at=?,published_url=?,external_content_id=?,publish_error='',updated_at=? WHERE id=? AND status='publishing'",
             )
             .bind(
-              publishedAt,
+              completedStatus,
+              recordedPublishedAt,
               payload.url || null,
               payload.mediaId || payload.contentToken || null,
               publishedAt,
@@ -484,6 +490,7 @@ export async function POST(request: Request) {
         );
         return Response.json({
           ok: true,
+          status: completedStatus,
           published_at: publishedAt,
           published_url: payload.url || "",
           detail,
@@ -504,6 +511,13 @@ export async function POST(request: Request) {
           `${claim.account_name} 登录已失效，请先到账号中心重新登录`,
         );
       }
+      if (!claim.xhs_user_id)
+        throw new Error(`${claim.account_name} 尚未绑定稳定账号ID，请先到账号中心重新核验`);
+      const identity = await readMcpIdentity(port);
+      if (identity.userId !== claim.xhs_user_id)
+        throw new Error(
+          `账号身份不匹配：预期账号ID ${claim.xhs_user_id}，实际 ${identity.userId}，已阻止发布`,
+        );
       if (
         claim.xhs_nickname &&
         login.nickname &&

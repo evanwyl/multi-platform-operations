@@ -8,6 +8,11 @@ import {
 } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { renderWechatMarkdown } from "./wechat-markdown.mjs";
+import {
+  isPathInside,
+  resolveChildPath,
+  safeFilename,
+} from "../safe-path.mjs";
 
 const tokenCache = new Map();
 const publishingAccounts = new Set();
@@ -18,9 +23,12 @@ function fail(message, status = 400, uncertain = false) {
 function paths(root, accountId) {
   if (!/^[a-zA-Z0-9_-]{8,100}$/.test(String(accountId)))
     throw fail("公众号账号标识不合法");
-  const accountRoot = resolve(root, accountId);
-  if (!accountRoot.startsWith(`${resolve(root)}/`))
+  let accountRoot;
+  try {
+    accountRoot = resolveChildPath(root, accountId);
+  } catch {
     throw fail("公众号账号路径不合法");
+  }
   return { accountRoot, file: join(accountRoot, "wechat-openapi.json") };
 }
 function credentials(root, accountId) {
@@ -146,13 +154,13 @@ function mime(path) {
 async function upload(root, token, path, permanent) {
   const full = resolve(String(path || ""));
   const assets = resolve(root, "../publish-assets");
-  if (!full.startsWith(`${assets}/`) || !existsSync(full))
+  if (!isPathInside(assets, full) || !existsSync(full))
     throw fail("公众号发布图片不存在或不在安全目录中");
   const form = new FormData();
   form.append(
     "media",
     new Blob([readFileSync(full)], { type: mime(full) }),
-    full.split("/").pop(),
+    safeFilename(full),
   );
   const endpoint = permanent
     ? `material/add_material?type=image&access_token=${encodeURIComponent(token)}`

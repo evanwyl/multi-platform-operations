@@ -47,7 +47,7 @@ test("keeps Zhihu credentials out of the database and persists them with owner-o
   assert.equal(saved.configured, true);
   assert.equal(adapter.zhihuAuthStatus(work, accountId).configured, true);
   const credentialFile = resolve(work, accountId, "openapi.json");
-  assert.equal((await stat(credentialFile)).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal((await stat(credentialFile)).mode & 0o777, 0o600);
   assert.equal(
     adapter.plainTextToArticleHtml("第一段\n换行\n\n第二段"),
     "<p>第一段<br />换行</p>\n<p>第二段</p>",

@@ -19,7 +19,7 @@ test("公众号凭据按账号隔离并以私有权限保存", () => {
     "0123456789abcdef0123456789abcdef",
   );
   const path = join(root, accountId, "wechat-openapi.json");
-  assert.equal(statSync(path).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(statSync(path).mode & 0o777, 0o600);
   assert.equal(wechatAuthStatus(root, accountId).configured, true);
   assert.doesNotMatch(
     JSON.stringify(wechatAuthStatus(root, accountId)),

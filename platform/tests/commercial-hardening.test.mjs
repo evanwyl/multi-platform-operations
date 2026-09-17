@@ -116,7 +116,7 @@ test("enforces one active claim per topic and account at the database boundary",
   assert.match(database, /WHERE duplicate_rank>1/);
   assert.match(
     database,
-    /CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_active_topic_account\s+ON claims\(topic_id,account_id\) WHERE status NOT IN \('published','archived'\)/s,
+    /CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_active_topic_account\s+ON claims\(topic_id,account_id\) WHERE status NOT IN \('published','drafted','archived'\)/s,
   );
   const claimBlock = app.slice(
     app.indexOf('action === "claim_topic"'),
@@ -126,6 +126,39 @@ test("enforces one active claim per topic and account at the database boundary",
   assert.match(claimBlock, /const competingClaim = await db\s*\.prepare/);
   assert.match(claimBlock, /刚刚已被这个账号认领，请刷新列表/);
   assert.match(claimBlock, /status: 409/);
+});
+
+test("isolates team members by account and checks stable Xiaohongshu identity before publishing", async () => {
+  const database = await source("lib/database.ts");
+  const app = await source("app/api/app/route.ts");
+  const creation = await source("app/api/creation/route.ts");
+  const publish = await source("app/api/publish/route.ts");
+  assert.match(database, /CREATE TABLE IF NOT EXISTS user_account_access/);
+  assert.match(app, /set_user_accounts/);
+  assert.match(app, /canAccessAccount\(db, user, account\.id\)/);
+  assert.match(creation, /canAccessAccount\(database\(\), user, claim\.account_id\)/);
+  assert.match(publish, /canAccessAccount\(db, user, claim\.account_id\)/);
+  assert.match(publish, /const identity = await readMcpIdentity\(port\)/);
+  assert.match(publish, /identity\.userId !== claim\.xhs_user_id/);
+});
+
+test("distinguishes a WeChat draft from a real publication", async () => {
+  const app = await source("app/api/app/route.ts");
+  const publish = await source("app/api/publish/route.ts");
+  assert.match(app, /drafted: "已入公众号草稿箱"/);
+  assert.match(publish, /const completedStatus = isWechatArticle \? "drafted" : "published"/);
+  assert.match(publish, /const recordedPublishedAt = isWechatArticle \? null : publishedAt/);
+});
+
+test("hardens article fetching and login throttling against untrusted network input", async () => {
+  const article = await source("app/api/article-research/route.ts");
+  const auth = await source("app/api/auth/route.ts");
+  const vite = await source("vite.config.ts");
+  assert.match(article, /redirect: "manual"/);
+  assert.match(article, /host\.includes\(":"\)/);
+  assert.match(article, /url\.username \|\| url\.password/);
+  assert.match(vite, /global_fetch_strictly_public/);
+  assert.match(auth, /HONGSHUTAI_TRUST_PROXY_HEADERS === "1"/);
 });
 
 test("protects the local manager and repairs cookie permissions", async (context) => {
@@ -146,7 +179,7 @@ test("protects the local manager and repairs cookie permissions", async (context
         ...process.env,
         MANAGER_PORT: String(port),
         RUNTIME_MANAGER_TOKEN: token,
-        XHS_MCP_BINARY: "/usr/bin/true",
+        XHS_MCP_BINARY: process.execPath,
         HONGSHUTAI_APP_ROOT: projectRoot,
         HONGSHUTAI_DATA_ROOT: work,
       },
@@ -181,11 +214,13 @@ test("protects the local manager and repairs cookie permissions", async (context
     headers: { authorization: `Bearer ${token}` },
   });
   assert.equal(authorized.status, 200);
-  assert.equal((await stat(cookies)).mode & 0o777, 0o600);
-  assert.equal(
-    (await stat(resolve(work, "runtime/accounts"))).mode & 0o777,
-    0o700,
-  );
+  if (process.platform !== "win32") {
+    assert.equal((await stat(cookies)).mode & 0o777, 0o600);
+    assert.equal(
+      (await stat(resolve(work, "runtime/accounts"))).mode & 0o777,
+      0o700,
+    );
+  }
   const coverName = "testfeed123.jpg";
   const coverPath = resolve(work, "runtime/trend-covers", coverName);
   await writeFile(coverPath, "image-bytes");
@@ -222,17 +257,19 @@ test("protects the local manager and repairs cookie permissions", async (context
     configured: true,
     auth_method: "openapi",
   });
-  assert.equal(
-    (
-      await stat(
-        resolve(
-          work,
-          "runtime/platform-accounts/zhihu-account-123/openapi.json",
-        ),
-      )
-    ).mode & 0o777,
-    0o600,
-  );
+  if (process.platform !== "win32") {
+    assert.equal(
+      (
+        await stat(
+          resolve(
+            work,
+            "runtime/platform-accounts/zhihu-account-123/openapi.json",
+          ),
+        )
+      ).mode & 0o777,
+      0o600,
+    );
+  }
 });
 
 test("implements the native macOS file chooser for review image uploads", async () => {
@@ -290,7 +327,14 @@ test("backs up and restores local customer data without unsafe archive paths", a
       .split("\n")
       .filter(Boolean)
       .some(
-        (entry) => entry.startsWith("/") || entry.split("/").includes(".."),
+        (entry) => {
+          const normalized = entry.replaceAll("\\", "/");
+          return (
+            normalized.startsWith("/") ||
+            /^[a-zA-Z]:\//.test(normalized) ||
+            normalized.split("/").includes("..")
+          );
+        },
       ),
     false,
   );

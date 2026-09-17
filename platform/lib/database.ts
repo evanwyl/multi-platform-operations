@@ -37,6 +37,11 @@ const schemaStatements = [
     note_count INTEGER, profile_synced_at TEXT,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS user_account_access (
+    user_id TEXT NOT NULL, account_id TEXT NOT NULL, created_at TEXT NOT NULL,
+    PRIMARY KEY(user_id,account_id), FOREIGN KEY(user_id) REFERENCES users(id),
+    FOREIGN KEY(account_id) REFERENCES accounts(id)
+  )`,
   `CREATE TABLE IF NOT EXISTS topics (
     id TEXT PRIMARY KEY, title TEXT NOT NULL, source_url TEXT NOT NULL DEFAULT '',
     relevance TEXT NOT NULL DEFAULT '中', status TEXT NOT NULL DEFAULT 'unclaimed',
@@ -146,6 +151,7 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_topics_status_created ON topics(status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_claims_owner_status ON claims(owner_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_claims_account_status ON claims(account_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_user_account_access_account ON user_account_access(account_id,user_id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_versions_claim_number ON claim_versions(claim_id, version_number)`,
   `CREATE INDEX IF NOT EXISTS idx_publish_jobs_claim_status ON publish_jobs(claim_id, status, created_at)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_publish_attempts_job_number ON publish_attempts(job_id, attempt_number)`,
@@ -160,7 +166,15 @@ let databaseInitialization: Promise<void> | null = null;
 
 async function initializeDatabase() {
   const db = database();
+  const accessTableExisted = Boolean(
+    await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_account_access'").first(),
+  );
   for (const statement of schemaStatements) await db.prepare(statement).run();
+  if (!accessTableExisted)
+    await db.prepare(`INSERT OR IGNORE INTO user_account_access (user_id,account_id,created_at)
+      SELECT u.id,a.id,? FROM users u CROSS JOIN accounts a
+      WHERE u.status='active' AND u.roles NOT LIKE '%"admin"%' AND a.is_demo=0`)
+      .bind(new Date().toISOString()).run();
   const portColumn = await db
     .prepare(
       "SELECT name FROM pragma_table_info('accounts') WHERE name='mcp_port'",
@@ -470,16 +484,17 @@ async function initializeDatabase() {
       SELECT id,ROW_NUMBER() OVER (
         PARTITION BY topic_id,account_id ORDER BY updated_at DESC,created_at ASC,id ASC
       ) AS duplicate_rank
-      FROM claims WHERE status NOT IN ('published','archived')
+      FROM claims WHERE status NOT IN ('published','drafted','archived')
     ) WHERE duplicate_rank>1
   )`,
     )
     .bind(new Date().toISOString())
     .run();
+  await db.prepare("DROP INDEX IF EXISTS idx_claims_active_topic_account").run();
   await db
     .prepare(
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_active_topic_account
-    ON claims(topic_id,account_id) WHERE status NOT IN ('published','archived')`,
+    ON claims(topic_id,account_id) WHERE status NOT IN ('published','drafted','archived')`,
     )
     .run();
   await db

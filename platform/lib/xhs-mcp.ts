@@ -51,3 +51,19 @@ export async function checkMcpLogin(port: number) {
   const nickname = text.match(/(?:用户名|昵称|username)\s*[:：]\s*([^\n]+)/i)?.[1]?.trim() || "";
   return { online, nickname, text: text || (online ? "已登录" : "未登录") };
 }
+
+export async function readMcpIdentity(port: number) {
+  const response = await fetch(`http://127.0.0.1:${port}/api/v1/login/status`, {
+    headers: protectedHeaders({ accept: "application/json" }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error("账号已登录，但唯一身份ID读取失败，已阻止继续操作");
+  const payload = await response.json() as {
+    success?: boolean;
+    data?: { is_logged_in?: boolean; username?: string; user_id?: string };
+  };
+  const userId = payload.data?.user_id?.trim() || "";
+  if (!payload.success || !payload.data?.is_logged_in || !userId)
+    throw new Error("账号已登录，但没有取得唯一身份ID，已阻止继续操作");
+  return { nickname: payload.data.username?.trim() || "", userId };
+}
