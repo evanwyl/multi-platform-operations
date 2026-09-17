@@ -382,3 +382,51 @@ test("packages a self-contained unsigned macOS app without customer data", async
   assert.match(launcher, /退出多平台内容运营/);
   assert.match(launcher, /URLByAppendingPathComponent:@"红薯台"/);
 });
+
+test("packages a self-contained Windows x64 app without customer data", async () => {
+  const service = await source("scripts/app-service.mjs");
+  const fetcher = await source("scripts/fetch-xhs-mcp.mjs");
+  const packager = await source("scripts/build-windows.mjs");
+  const launcher = await source("packaging/windows/Program.cs");
+  const project = await source("packaging/windows/Launcher.csproj");
+  const workflow = await source("../.github/workflows/ci.yml");
+
+  assert.match(fetcher, /win32-x64/);
+  assert.match(
+    fetcher,
+    /3578c9fcf3e7be0b79564aeceef8c4f38e0072d9357ca1f911ee14cd37bd454c/,
+  );
+  assert.match(service, /xiaohongshu-mcp-windows-amd64\.exe/);
+  assert.match(packager, /process\.platform !== "win32"/);
+  assert.match(packager, /windows-x64-portable/);
+  assert.match(packager, /assertNoCustomerData\(packageRoot\)/);
+  assert.match(packager, /--self-contained/);
+  assert.match(packager, /node\.exe/);
+  assert.match(packager, /runtime\/bin\/chromium/);
+  assert.match(packager, /WebView2-\$\{filename\}/);
+  for (const forbidden of [
+    "team-config.json",
+    "cookies.json",
+    "ai.json",
+    "runtime/accounts",
+    "runtime/platform-accounts",
+    "runtime/publish-assets",
+  ]) {
+    assert.match(packager, new RegExp(forbidden.replace("/", "\\/")));
+  }
+  assert.match(project, /net8\.0-windows/);
+  assert.match(project, /Microsoft\.Web\.WebView2/);
+  assert.match(launcher, /CoreWebView2Environment/);
+  assert.match(launcher, /hongshutai_device/);
+  assert.match(launcher, /SpecialFolder\.LocalApplicationData/);
+  assert.match(launcher, /service\.Kill\(true\)/);
+  assert.match(launcher, /独立使用/);
+  assert.match(launcher, /创建团队主机/);
+  assert.match(launcher, /加入已有团队/);
+  assert.match(launcher, /仅允许专用网络/);
+  assert.match(workflow, /windows-package:/);
+  assert.match(workflow, /npm run package:windows/);
+  assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
+  assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
+  assert.match(workflow, /actions\/upload-artifact@[0-9a-f]{40}/);
+});
