@@ -24,6 +24,7 @@ const packageName = `多平台内容运营-${version}-windows-x64-portable`;
 const packageRoot = resolve(outputRoot, packageName);
 const packagedApp = resolve(packageRoot, "resources/app");
 const packagedRuntime = resolve(packageRoot, "resources/runtime");
+const projectLicense = resolve(projectRoot, "..", "LICENSE");
 const zipPath = resolve(outputRoot, `${packageName}.zip`);
 const npmCli = process.env.npm_execpath;
 if (!npmCli || !existsSync(npmCli)) {
@@ -145,6 +146,11 @@ function copyApplicationSources() {
   for (const document of ["README.md", "THIRD_PARTY_NOTICES.md"]) {
     copyFileSync(resolve(projectRoot, document), resolve(packagedApp, document));
   }
+  if (!existsSync(projectLicense)) {
+    throw new Error("找不到项目 Apache-2.0 LICENSE，拒绝生成分发包");
+  }
+  copyFileSync(projectLicense, resolve(packageRoot, "LICENSE"));
+  copyFileSync(projectLicense, resolve(packageRoot, "resources", "LICENSE"));
   cpSync(resolve(projectRoot, "docs"), resolve(packagedApp, "docs"), {
     recursive: true,
   });

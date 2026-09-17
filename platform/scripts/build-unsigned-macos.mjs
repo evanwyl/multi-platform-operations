@@ -28,6 +28,7 @@ const legacyAppBundle = resolve(outputRoot, "红薯台.app");
 const contents = resolve(appBundle, "Contents");
 const resources = resolve(contents, "Resources");
 const packagedApp = resolve(resources, "app");
+const projectLicense = resolve(projectRoot, "..", "LICENSE");
 const version = JSON.parse(
   readFileSync(resolve(projectRoot, "package.json"), "utf8"),
 ).version;
@@ -232,6 +233,10 @@ for (const script of [
 for (const document of ["README.md", "THIRD_PARTY_NOTICES.md"]) {
   copyFileSync(resolve(projectRoot, document), resolve(packagedApp, document));
 }
+if (!existsSync(projectLicense)) {
+  throw new Error("找不到项目 Apache-2.0 LICENSE，拒绝生成分发包");
+}
+copyFileSync(projectLicense, resolve(resources, "LICENSE"));
 cpSync(resolve(projectRoot, "docs"), resolve(packagedApp, "docs"), {
   recursive: true,
 });

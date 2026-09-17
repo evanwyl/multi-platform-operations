@@ -2,7 +2,7 @@
 
 多平台内容运营是本机部署、以团队协作为核心的 AI 内容运营平台。小红书、知乎和微信公众号使用独立账号与发布适配器，共享选题、创作、审核和发布工作流。项目不是 SaaS：业务数据库、账号 Cookie、AI Key 和发布素材都保存在团队主机本地。
 
-> 仓库当前已公开，但根目录许可证仍待维护者最终选择。在 `LICENSE` 合并前，代码属于“公开可见”，尚未授予完整的开源复制、修改与分发权利。
+> 项目采用 [Apache License 2.0](../LICENSE) 开源。第三方组件继续适用各自的许可证，详见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
 
 ## 支持范围
 
@@ -106,7 +106,7 @@ npm run restore -- /绝对路径/multi-platform-content-日期.tar.gz --confirm
 
 ## 发布依赖与许可证
 
-`npm run prepare:runtime` 会根据构建系统下载 `xiaohongshu-mcp v2.5.0` 的官方 macOS arm64 或 Windows amd64 Release，并验证固定 SHA-256；哈希不一致时会拒绝写入。第三方组件及许可证见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。最终安装包必须同时附带该文件和完整许可证文本。
+项目源码采用 [Apache License 2.0](../LICENSE)。`npm run prepare:runtime` 会根据构建系统下载 `xiaohongshu-mcp v2.5.0` 的官方 macOS arm64 或 Windows amd64 Release，并验证固定 SHA-256；哈希不一致时会拒绝写入。第三方组件及许可证见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。最终安装包必须同时附带项目许可证、该文件和第三方完整许可证文本。
 
 ## 质量门禁
 

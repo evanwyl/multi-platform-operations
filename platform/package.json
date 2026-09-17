@@ -1,6 +1,7 @@
 {
   "name": "hongshutai-local",
   "version": "0.21.1",
+  "license": "Apache-2.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
