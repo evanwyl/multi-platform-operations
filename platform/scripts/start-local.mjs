@@ -22,12 +22,11 @@ const teamAccessToken = process.env.HONGSHUTAI_TEAM_TOKEN || "";
 const bindIp = teamMode === "host" ? "0.0.0.0" : "127.0.0.1";
 
 const children = [
-  spawn("npm", ["run", "runtime"], { stdio: "inherit", env: localEnv }),
+  spawn(process.execPath, [resolve(import.meta.dirname, "../runtime/manager.mjs")], { stdio: "inherit", env: localEnv }),
   spawn(
-    "npm",
+    process.execPath,
     [
-      "exec",
-      "--",
+      resolve(import.meta.dirname, "run-local-cli.mjs"),
       "wrangler",
       "dev",
       "--config",
