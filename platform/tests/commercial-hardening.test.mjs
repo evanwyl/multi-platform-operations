@@ -257,17 +257,19 @@ test("protects the local manager and repairs cookie permissions", async (context
     configured: true,
     auth_method: "openapi",
   });
-  assert.equal(
-    (
-      await stat(
-        resolve(
-          work,
-          "runtime/platform-accounts/zhihu-account-123/openapi.json",
-        ),
-      )
-    ).mode & 0o777,
-    0o600,
-  );
+  if (process.platform !== "win32") {
+    assert.equal(
+      (
+        await stat(
+          resolve(
+            work,
+            "runtime/platform-accounts/zhihu-account-123/openapi.json",
+          ),
+        )
+      ).mode & 0o777,
+      0o600,
+    );
+  }
 });
 
 test("implements the native macOS file chooser for review image uploads", async () => {
