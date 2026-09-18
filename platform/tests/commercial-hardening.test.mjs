@@ -133,6 +133,7 @@ test("isolates team members by account and checks stable Xiaohongshu identity be
   const app = await source("app/api/app/route.ts");
   const creation = await source("app/api/creation/route.ts");
   const publish = await source("app/api/publish/route.ts");
+  const assets = await source("app/api/assets/route.ts");
   assert.match(database, /CREATE TABLE IF NOT EXISTS user_account_access/);
   assert.match(app, /set_user_accounts/);
   assert.match(app, /canAccessAccount\(db, user, account\.id\)/);
@@ -140,6 +141,8 @@ test("isolates team members by account and checks stable Xiaohongshu identity be
   assert.match(publish, /canAccessAccount\(db, user, claim\.account_id\)/);
   assert.match(publish, /const identity = await readMcpIdentity\(port\)/);
   assert.match(publish, /identity\.userId !== claim\.xhs_user_id/);
+  assert.match(assets, /SELECT account_id,publish_images FROM claims/);
+  assert.match(assets, /canAccessAccount\(db, user, claim\.account_id\)/);
 });
 
 test("distinguishes a WeChat draft from a real publication", async () => {
@@ -297,6 +300,12 @@ test("implements native JavaScript dialogs required by publish and recovery acti
 });
 
 test("backs up and restores local customer data without unsafe archive paths", async (context) => {
+  const backupSource = await source("scripts/backup-local.mjs");
+  const restoreSource = await source("scripts/restore-local.mjs");
+  assert.match(backupSource, /import \{ create \} from "tar"/);
+  assert.match(restoreSource, /import \{ extract, list \} from "tar"/);
+  assert.doesNotMatch(backupSource, /spawnSync\("tar"/);
+  assert.doesNotMatch(restoreSource, /spawnSync\("tar"/);
   const work = await mkdtemp(resolve(tmpdir(), "hongshutai-backup-test-"));
   context.after(() => rm(work, { recursive: true, force: true }));
   const database = resolve(work, ".wrangler/state/v3/d1/data.sqlite");
@@ -371,6 +380,7 @@ test("packages a self-contained unsigned macOS app without customer data", async
   assert.match(packager, /verbatimSymlinks: true/);
   assert.match(packager, /assertPortableSymlinks\(mountedApp\)/);
   assert.match(packager, /assertNoCustomerData\(mountedApp\)/);
+  assert.match(packager, /runtime\/safe-path\.mjs/);
   for (const forbidden of [
     "team-config.json",
     "cookies.json",
@@ -444,6 +454,9 @@ test("packages a self-contained Windows x64 app without customer data", async ()
   assert.match(packager, /process\.platform !== "win32"/);
   assert.match(packager, /windows-x64-portable/);
   assert.match(packager, /assertNoCustomerData\(packageRoot\)/);
+  assert.match(packager, /runtime\/safe-path\.mjs/);
+  assert.match(workflow, /Extract and smoke test Windows package/);
+  assert.match(workflow, /smoke-packaged-runtime\.mjs/);
   assert.match(packager, /--self-contained/);
   assert.match(packager, /node\.exe/);
   assert.match(packager, /runtime\/bin\/chromium/);
