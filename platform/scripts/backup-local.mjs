@@ -9,8 +9,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
 import net from "node:net";
+import { create } from "tar";
 
 const appRoot = resolve(
   process.env.HONGSHUTAI_APP_ROOT || resolve(import.meta.dirname, ".."),
@@ -85,10 +85,10 @@ try {
     { mode: 0o600 },
   );
   mkdirSync(resolve(destination, ".."), { recursive: true, mode: 0o700 });
-  const result = spawnSync("tar", ["-czf", destination, "-C", staging, "."], {
-    stdio: "inherit",
-  });
-  if (result.status !== 0) throw new Error("系统 tar 命令未能生成备份包");
+  await create(
+    { gzip: true, file: destination, cwd: staging, portable: true },
+    ["."],
+  );
   process.stdout.write(
     `备份完成：${destination}\n文件：${basename(destination)}\n`,
   );

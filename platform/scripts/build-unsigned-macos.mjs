@@ -179,6 +179,10 @@ copyFileSync(
   resolve(projectRoot, "runtime/manager.mjs"),
   resolve(packagedApp, "runtime/manager.mjs"),
 );
+copyFileSync(
+  resolve(projectRoot, "runtime/safe-path.mjs"),
+  resolve(packagedApp, "runtime/safe-path.mjs"),
+);
 cpSync(
   resolve(projectRoot, "runtime/prompts"),
   resolve(packagedApp, "runtime/prompts"),
@@ -251,6 +255,7 @@ const runtimePackage = {
     "playwright-core": "1.55.0",
     marked: "18.0.13",
     "sanitize-html": "2.17.7",
+    tar: "7.5.22",
   },
 };
 writeFileSync(

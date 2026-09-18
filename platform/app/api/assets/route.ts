@@ -1,6 +1,7 @@
 import { currentUser } from "../../../lib/auth";
 import { database, ensureDatabase } from "../../../lib/database";
 import { managerFetch } from "../../../lib/runtime-client";
+import { canAccessAccount } from "../../../lib/account-access";
 
 export async function GET(request: Request) {
   await ensureDatabase();
@@ -10,8 +11,11 @@ export async function GET(request: Request) {
   const claimId = url.searchParams.get("claim_id") || "";
   const index = Number(url.searchParams.get("index"));
   if (!claimId || !Number.isInteger(index) || index < 0 || index > 8) return Response.json({ error: "图片参数不合法" }, { status: 400 });
-  const claim = await database().prepare("SELECT publish_images FROM claims WHERE id=?").bind(claimId).first<{ publish_images: string }>();
+  const db = database();
+  const claim = await db.prepare("SELECT account_id,publish_images FROM claims WHERE id=?").bind(claimId).first<{ account_id: string; publish_images: string }>();
   if (!claim) return Response.json({ error: "内容任务不存在" }, { status: 404 });
+  if (!(await canAccessAccount(db, user, claim.account_id)))
+    return Response.json({ error: "你没有该账号的图片访问权限" }, { status: 403 });
   const paths = JSON.parse(claim.publish_images || "[]") as string[];
   const path = paths[index];
   if (!path) return Response.json({ error: "图片不存在" }, { status: 404 });

@@ -5,12 +5,13 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
 import net from "node:net";
 import { unsafeArchiveEntry } from "../runtime/safe-path.mjs";
+import { extract, list } from "tar";
 
 const appRoot = resolve(
   process.env.HONGSHUTAI_APP_ROOT || resolve(import.meta.dirname, ".."),
@@ -31,6 +32,8 @@ const archive = resolve(archiveArg);
 const managerPort = Number(process.env.HONGSHUTAI_BACKUP_MANAGER_PORT || 18100);
 const workerPort = Number(process.env.HONGSHUTAI_BACKUP_WORKER_PORT || 3000);
 if (!existsSync(archive)) throw new Error(`备份文件不存在：${archive}`);
+if (statSync(archive).size > 5 * 1024 * 1024 * 1024)
+  throw new Error("备份包超过 5GB，已拒绝恢复");
 
 function portOpen(port) {
   return new Promise((resolvePort) => {
@@ -52,11 +55,20 @@ if ((await portOpen(managerPort)) || (await portOpen(workerPort))) {
   throw new Error("请先完全退出多平台内容运营，再执行恢复");
 }
 
-const listing = spawnSync("tar", ["-tzf", archive], { encoding: "utf8" });
-if (listing.status !== 0) throw new Error("备份包损坏或格式无法识别");
-const entries = listing.stdout.split("\n").filter(Boolean);
-if (entries.some(unsafeArchiveEntry))
-  throw new Error("备份包包含不安全路径，已拒绝恢复");
+const entries = [];
+try {
+  await list({
+    file: archive,
+    onentry(entry) {
+      entries.push(entry.path);
+      if (unsafeArchiveEntry(entry.path) || (entry.linkpath && unsafeArchiveEntry(entry.linkpath)))
+        throw new Error("备份包包含不安全路径，已拒绝恢复");
+    },
+  });
+} catch (error) {
+  if (error instanceof Error && error.message.includes("不安全路径")) throw error;
+  throw new Error("备份包损坏或格式无法识别", { cause: error });
+}
 
 const staging = mkdtempSync(join(tmpdir(), "hongshutai-restore-"));
 const rollbackRoot = join(
@@ -64,10 +76,12 @@ const rollbackRoot = join(
   `restore-rollback-${new Date().toISOString().replace(/[:.]/g, "-")}`,
 );
 try {
-  const extracted = spawnSync("tar", ["-xzf", archive, "-C", staging], {
-    stdio: "inherit",
+  await extract({
+    file: archive,
+    cwd: staging,
+    strict: true,
+    preservePaths: false,
   });
-  if (extracted.status !== 0) throw new Error("无法解压备份包");
   const manifest = JSON.parse(
     readFileSync(join(staging, "manifest.json"), "utf8"),
   );

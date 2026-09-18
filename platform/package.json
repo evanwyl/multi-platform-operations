@@ -31,7 +31,8 @@
     "playwright-core": "^1.55.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "sanitize-html": "^2.17.7"
+    "sanitize-html": "^2.17.7",
+    "tar": "7.5.22"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.54.10",
