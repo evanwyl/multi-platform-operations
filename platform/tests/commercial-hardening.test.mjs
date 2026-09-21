@@ -299,6 +299,15 @@ test("implements native JavaScript dialogs required by publish and recovery acti
   assert.match(launcher, /field\.stringValue = defaultText/);
 });
 
+test("uses a fixed template symbol for the macOS menu bar item", async () => {
+  const launcher = await source("packaging/HongShuTaiLauncher.m");
+  assert.match(launcher, /statusItemWithLength:NSSquareStatusItemLength/);
+  assert.match(launcher, /imageWithSystemSymbolName:@"square\.grid\.2x2\.fill"/);
+  assert.match(launcher, /statusIcon\.template = YES/);
+  assert.match(launcher, /imageScaling = NSImageScaleProportionallyDown/);
+  assert.doesNotMatch(launcher, /NSApp\.applicationIconImage/);
+});
+
 test("backs up and restores local customer data without unsafe archive paths", async (context) => {
   const backupSource = await source("scripts/backup-local.mjs");
   const restoreSource = await source("scripts/restore-local.mjs");
