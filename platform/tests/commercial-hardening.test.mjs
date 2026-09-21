@@ -483,6 +483,10 @@ test("packages a self-contained Windows x64 app without customer data", async ()
   assert.match(project, /net8\.0-windows/);
   assert.match(project, /Microsoft\.Web\.WebView2/);
   assert.match(launcher, /CoreWebView2Environment/);
+  assert.match(launcher, /if \(ready \|\| closing \|\| probing\) return/);
+  assert.match(launcher, /finally\s*\{\s*probing = false/);
+  assert.match(launcher, /initializationTask \?\?= InitializeWebViewAsync\(\)/);
+  assert.match(launcher, /WebView2RuntimeNotFoundException/);
   assert.match(launcher, /hongshutai_device/);
   assert.match(launcher, /SpecialFolder\.LocalApplicationData/);
   assert.match(launcher, /service\.Kill\(true\)/);
