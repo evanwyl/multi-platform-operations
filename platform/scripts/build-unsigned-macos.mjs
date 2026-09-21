@@ -311,16 +311,10 @@ run("/usr/bin/clang", [
 
 const iconWork = mkdtempSync(resolve(tmpdir(), "hongshutai-icon-"));
 try {
-  const sourceSvg = readFileSync(
-    resolve(projectRoot, "public/favicon.svg"),
-    "utf8",
-  ).replace('width="24" height="24"', 'width="1024" height="1024"');
-  const largeSvg = resolve(iconWork, "icon.svg");
-  const largePng = resolve(iconWork, "icon.png");
+  const largePng = resolve(projectRoot, "public/app-logo.png");
   const iconset = resolve(iconWork, "AppIcon.iconset");
-  writeFileSync(largeSvg, sourceSvg);
   mkdirSync(iconset);
-  run("/usr/bin/sips", ["-s", "format", "png", largeSvg, "--out", largePng]);
+  copyFileSync(largePng, resolve(resources, "AppLogo.png"));
   for (const [name, size] of [
     ["icon_16x16.png", 16],
     ["icon_16x16@2x.png", 32],

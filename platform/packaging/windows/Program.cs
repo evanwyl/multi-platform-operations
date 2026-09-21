@@ -23,6 +23,10 @@ internal sealed class TeamConfiguration
 
 internal static class Program
 {
+    internal static readonly Icon AppIcon =
+        Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? Application.ExecutablePath)
+        ?? SystemIcons.Application;
+
     [STAThread]
     private static void Main()
     {
@@ -67,7 +71,7 @@ internal sealed class OperationsContext : ApplicationContext
 
         tray = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = Program.AppIcon,
             Text = "多平台内容运营正在启动…",
             Visible = true,
             ContextMenuStrip = BuildMenu(),
@@ -319,6 +323,7 @@ internal sealed class MainWindow : Form
         this.platformUri = platformUri;
         this.token = token;
         Text = "多平台内容运营";
+        Icon = Program.AppIcon;
         Width = 1280;
         Height = 820;
         MinimumSize = new Size(960, 640);
@@ -378,6 +383,7 @@ internal sealed class TeamSetupDialog : Form
     {
         Configuration = current;
         Text = "多平台内容运营 · 使用方式";
+        Icon = Program.AppIcon;
         Width = 560;
         Height = 300;
         FormBorderStyle = FormBorderStyle.FixedDialog;

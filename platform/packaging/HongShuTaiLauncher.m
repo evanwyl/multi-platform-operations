@@ -234,20 +234,18 @@
     title = @"团队主机正在启动";
     hint = @"正在准备共享工作区，请稍候…";
   }
-  NSString *loadingPage = [NSString stringWithFormat:@"<!doctype html><meta charset='utf-8'><style>body{margin:0;display:grid;place-items:center;height:100vh;background:#f7f9fc;color:#172033;font:16px -apple-system,BlinkMacSystemFont,sans-serif}.box{text-align:center}.icon{display:grid;grid-template-columns:repeat(2,18px);gap:4px;width:max-content;margin:0 auto 18px}.icon i{width:18px;height:18px;border-radius:5px;background:#2e9eff}.icon i:nth-child(2),.icon i:nth-child(3){background:#0c79d8}.icon i:nth-child(4){background:#68c4ff}.hint{color:#64748b;margin-top:8px}</style><div class='box'><div class='icon' aria-hidden='true'><i></i><i></i><i></i><i></i></div><strong>%@</strong><div class='hint'>%@</div></div>", title, hint];
+  NSURL *logoURL = [[NSBundle mainBundle] URLForResource:@"AppLogo" withExtension:@"png"];
+  NSString *loadingPage = [NSString stringWithFormat:@"<!doctype html><meta charset='utf-8'><style>body{margin:0;display:grid;place-items:center;height:100vh;background:#f7f9fc;color:#172033;font:16px -apple-system,BlinkMacSystemFont,sans-serif}.box{text-align:center}.icon{display:block;width:76px;height:76px;border-radius:20px;margin:0 auto 18px;box-shadow:0 12px 30px rgba(65,131,222,.2)}.hint{color:#64748b;margin-top:8px}</style><div class='box'><img class='icon' src='%@' alt=''><strong>%@</strong><div class='hint'>%@</div></div>", logoURL.absoluteString ?: @"", title, hint];
   [self.webView loadHTMLString:loadingPage baseURL:nil];
 }
 
 - (void)configureMenu {
   self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
-  NSImage *statusIcon = [NSImage imageWithSystemSymbolName:@"square.grid.2x2.fill"
-                                         accessibilityDescription:@"多平台内容运营"];
-  if (!statusIcon) statusIcon = [NSImage imageNamed:NSImageNameActionTemplate];
-  NSImageSymbolConfiguration *symbolConfiguration =
-      [NSImageSymbolConfiguration configurationWithPointSize:15
-                                                      weight:NSFontWeightSemibold];
-  statusIcon = [statusIcon imageWithSymbolConfiguration:symbolConfiguration] ?: statusIcon;
-  statusIcon.template = YES;
+  NSImage *statusIcon = [[NSImage alloc] initWithContentsOfURL:
+      [[NSBundle mainBundle] URLForResource:@"AppLogo" withExtension:@"png"]];
+  if (!statusIcon) statusIcon = [NSImage imageNamed:NSImageNameApplicationIcon];
+  statusIcon.size = NSMakeSize(18, 18);
+  statusIcon.template = NO;
   self.statusItem.button.image = statusIcon;
   self.statusItem.button.imagePosition = NSImageOnly;
   self.statusItem.button.imageScaling = NSImageScaleProportionallyDown;

@@ -2211,13 +2211,16 @@ body {
 }
 
 .brand-mark {
-  background: linear-gradient(
-    145deg,
-    var(--brand-cyan),
-    var(--brand-primary) 48%,
-    var(--brand-action)
-  );
+  overflow: hidden;
+  background: #ffffff;
   box-shadow: 0 10px 24px rgb(0 110 255 / 34%);
+}
+
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .nav-item.active {
