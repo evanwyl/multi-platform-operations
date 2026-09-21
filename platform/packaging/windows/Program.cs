@@ -52,6 +52,7 @@ internal sealed class OperationsContext : ApplicationContext
     private TeamConfiguration configuration = new();
     private Uri platformUri = new("http://127.0.0.1:3000");
     private int probeAttempts;
+    private bool probing;
     private bool ready;
     private bool closing;
 
@@ -164,41 +165,49 @@ internal sealed class OperationsContext : ApplicationContext
 
     private async Task ProbeAsync()
     {
-        if (ready || closing) return;
-        probeAttempts += 1;
+        if (ready || closing || probing) return;
+        probing = true;
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(platformUri, "/api/auth"));
-            if (!string.IsNullOrWhiteSpace(configuration.Token))
-                request.Headers.Add("Cookie", $"hongshutai_device={configuration.Token}");
-            using var response = await http.SendAsync(request);
-            if (response.StatusCode == HttpStatusCode.Forbidden)
+            probeAttempts += 1;
+            try
             {
+                using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(platformUri, "/api/auth"));
+                if (!string.IsNullOrWhiteSpace(configuration.Token))
+                    request.Headers.Add("Cookie", $"hongshutai_device={configuration.Token}");
+                using var response = await http.SendAsync(request);
+                if (response.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    probeTimer.Stop();
+                    Fatal("团队主机拒绝了这台设备。请检查主机地址和团队连接码。");
+                    return;
+                }
+                if (response.StatusCode != HttpStatusCode.OK) return;
+                ready = true;
                 probeTimer.Stop();
-                Fatal("团队主机拒绝了这台设备。请检查主机地址和团队连接码。");
+                tray.Text = configuration.Mode switch
+                {
+                    "host" => "多平台内容运营：团队主机运行中",
+                    "member" => "多平台内容运营：已连接团队主机",
+                    _ => "多平台内容运营运行中",
+                };
+                if (window is not null) await window.NavigateAsync();
+            }
+            catch when (probeAttempts <= 120)
+            {
                 return;
             }
-            if (response.StatusCode != HttpStatusCode.OK) return;
-            ready = true;
-            probeTimer.Stop();
-            tray.Text = configuration.Mode switch
+            if (probeAttempts > 120)
             {
-                "host" => "多平台内容运营：团队主机运行中",
-                "member" => "多平台内容运营：已连接团队主机",
-                _ => "多平台内容运营运行中",
-            };
-            if (window is not null) await window.NavigateAsync();
+                probeTimer.Stop();
+                Fatal(configuration.Mode == "member"
+                    ? $"无法连接团队主机：{platformUri}\n\n请确认主机正在运行、防火墙允许专用网络访问，并检查连接码。"
+                    : $"等待本地服务启动超时。请查看日志：{logPath}");
+            }
         }
-        catch when (probeAttempts <= 120)
+        finally
         {
-            return;
-        }
-        if (probeAttempts > 120)
-        {
-            probeTimer.Stop();
-            Fatal(configuration.Mode == "member"
-                ? $"无法连接团队主机：{platformUri}\n\n请确认主机正在运行、防火墙允许专用网络访问，并检查连接码。"
-                : $"等待本地服务启动超时。请查看日志：{logPath}");
+            probing = false;
         }
     }
 
@@ -302,7 +311,7 @@ internal sealed class MainWindow : Form
     private readonly string dataRoot;
     private readonly Uri platformUri;
     private readonly string token;
-    private bool initialized;
+    private Task? initializationTask;
 
     public MainWindow(string dataRoot, Uri platformUri, string token)
     {
@@ -319,25 +328,20 @@ internal sealed class MainWindow : Form
 
     public async Task NavigateAsync()
     {
-        if (!initialized)
+        try
         {
-            try
-            {
-                var userData = Path.Combine(dataRoot, "webview2");
-                var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: userData);
-                await webView.EnsureCoreWebView2Async(environment);
-                webView.CoreWebView2.NewWindowRequested += (_, eventArgs) =>
-                {
-                    eventArgs.Handled = true;
-                    Process.Start(new ProcessStartInfo(eventArgs.Uri) { UseShellExecute = true });
-                };
-                initialized = true;
-            }
-            catch (Exception error)
-            {
-                MessageBox.Show($"无法启动 WebView2：{error.Message}\n\n请安装 Microsoft Edge WebView2 Runtime 后重试。", "多平台内容运营", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
+            initializationTask ??= InitializeWebViewAsync();
+            await initializationTask;
+        }
+        catch (WebView2RuntimeNotFoundException error)
+        {
+            MessageBox.Show($"未检测到 Microsoft Edge WebView2 Runtime：{error.Message}\n\n请安装 WebView2 Runtime 后重试。", "多平台内容运营", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+        catch (Exception error)
+        {
+            MessageBox.Show($"无法启动 WebView2：{error.Message}\n\nWebView2 已安装时无需重复安装，请退出程序后查看日志或联系维护者。", "多平台内容运营", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
         }
         if (!string.IsNullOrWhiteSpace(token))
         {
@@ -348,6 +352,18 @@ internal sealed class MainWindow : Form
             webView.CoreWebView2.CookieManager.AddOrUpdateCookie(cookie);
         }
         webView.CoreWebView2.Navigate(platformUri.ToString());
+    }
+
+    private async Task InitializeWebViewAsync()
+    {
+        var userData = Path.Combine(dataRoot, "webview2");
+        var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: userData);
+        await webView.EnsureCoreWebView2Async(environment);
+        webView.CoreWebView2.NewWindowRequested += (_, eventArgs) =>
+        {
+            eventArgs.Handled = true;
+            Process.Start(new ProcessStartInfo(eventArgs.Uri) { UseShellExecute = true });
+        };
     }
 }
 
