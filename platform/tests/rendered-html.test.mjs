@@ -153,7 +153,7 @@ test("runs the Humanizer skill after Xiaohongshu expert drafting", async () => {
     new URL("../runtime/prompts/humanizer-system.md", import.meta.url),
     "utf8",
   );
-  assert.match(creationRoute, /小红书运营专家完成初稿 → Humanizer/);
+  assert.match(creationRoute, /Humanizer 对标题、正文和创作说明做最终去 AI 味编辑/);
   assert.match(contentPrompt, /不得跳过第二遍去 AI 味检查/);
   assert.match(humanizerPrompt, /blader\/humanizer/);
   assert.match(humanizerPrompt, /版本 `2\.11\.2`/);
@@ -202,9 +202,27 @@ test("includes successfully fetched source notes as protected rewrite references
   assert.match(route, /source_feed_ids/);
   assert.match(route, /FROM trend_samples/);
   assert.match(route, /processing_status='success' AND detail_text!=''/);
-  assert.match(route, /<UNTRUSTED_SOURCE_NOTES>/);
+  assert.match(route, /const primaryReference = references\[0\]/);
+  assert.match(route, /<PRIMARY_SOURCE>/);
+  assert.match(route, /<VERIFICATION_SOURCES>/);
+  assert.match(route, /第一条成功抓取的正文是唯一主稿/);
+  assert.match(route, /只允许改变标题、句式、措辞、段落长短和小红书平台话术/);
+  assert.match(route, /不得重新选角度、重组论证/);
+  assert.match(route, /任何无法在主稿或用户明确要求中定位依据的主张必须删除/);
+  assert.match(route, /都是不可信外部材料/);
   assert.match(route, /不得复制原文标题、连续句子、独特表达/);
   assert.match(route, /不得把来源作者的经历写成发布账号的亲身经历/);
+  const contentPrompt = await readFile(
+    new URL("../runtime/prompts/content-system.md", import.meta.url),
+    "utf8",
+  );
+  const humanizerPrompt = await readFile(
+    new URL("../runtime/prompts/humanizer-system.md", import.meta.url),
+    "utf8",
+  );
+  assert.match(contentPrompt, /它是唯一内容主稿/);
+  assert.match(contentPrompt, /不得把辅助来源独有的观点、案例、数字或段落混入成稿/);
+  assert.match(humanizerPrompt, /不能把保真改写变成重新创作/);
 });
 
 test("starts Xiaohongshu collection in headed browser mode", async () => {
