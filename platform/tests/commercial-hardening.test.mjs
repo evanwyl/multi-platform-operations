@@ -299,11 +299,11 @@ test("implements native JavaScript dialogs required by publish and recovery acti
   assert.match(launcher, /field\.stringValue = defaultText/);
 });
 
-test("uses the product logo for the macOS menu bar item", async () => {
+test("uses an adaptive monochrome product mark for the macOS menu bar item", async () => {
   const launcher = await source("packaging/HongShuTaiLauncher.m");
   assert.match(launcher, /statusItemWithLength:NSSquareStatusItemLength/);
-  assert.match(launcher, /URLForResource:@"AppLogo" withExtension:@"png"/);
-  assert.match(launcher, /statusIcon\.template = NO/);
+  assert.match(launcher, /URLForResource:@"StatusIcon" withExtension:@"png"/);
+  assert.match(launcher, /statusIcon\.template = YES/);
   assert.match(launcher, /imageScaling = NSImageScaleProportionallyDown/);
 });
 
@@ -484,8 +484,10 @@ test("packages a self-contained Windows x64 app without customer data", async ()
   assert.match(project, /net8\.0-windows/);
   assert.match(project, /Microsoft\.Web\.WebView2/);
   assert.match(project, /<ApplicationIcon>AppIcon\.ico<\/ApplicationIcon>/);
+  assert.match(project, /<EmbeddedResource Include="TrayIcon\.ico"/);
   assert.match(launcher, /Icon\.ExtractAssociatedIcon/);
   assert.match(launcher, /Icon = Program\.AppIcon/);
+  assert.match(launcher, /Icon = Program\.TrayIcon/);
   assert.match(launcher, /CoreWebView2Environment/);
   assert.match(launcher, /if \(ready \|\| closing \|\| probing\) return/);
   assert.match(launcher, /finally\s*\{\s*probing = false/);

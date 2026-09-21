@@ -242,10 +242,10 @@
 - (void)configureMenu {
   self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
   NSImage *statusIcon = [[NSImage alloc] initWithContentsOfURL:
-      [[NSBundle mainBundle] URLForResource:@"AppLogo" withExtension:@"png"]];
+      [[NSBundle mainBundle] URLForResource:@"StatusIcon" withExtension:@"png"]];
   if (!statusIcon) statusIcon = [NSImage imageNamed:NSImageNameApplicationIcon];
   statusIcon.size = NSMakeSize(18, 18);
-  statusIcon.template = NO;
+  statusIcon.template = YES;
   self.statusItem.button.image = statusIcon;
   self.statusItem.button.imagePosition = NSImageOnly;
   self.statusItem.button.imageScaling = NSImageScaleProportionallyDown;

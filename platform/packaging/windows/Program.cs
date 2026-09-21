@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Web.WebView2.Core;
@@ -26,6 +27,15 @@ internal static class Program
     internal static readonly Icon AppIcon =
         Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? Application.ExecutablePath)
         ?? SystemIcons.Application;
+    internal static readonly Icon TrayIcon = LoadTrayIcon();
+
+    private static Icon LoadTrayIcon()
+    {
+        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("TrayIcon.ico");
+        if (stream is null) return AppIcon;
+        using var source = new Icon(stream);
+        return (Icon)source.Clone();
+    }
 
     [STAThread]
     private static void Main()
@@ -71,7 +81,7 @@ internal sealed class OperationsContext : ApplicationContext
 
         tray = new NotifyIcon
         {
-            Icon = Program.AppIcon,
+            Icon = Program.TrayIcon,
             Text = "多平台内容运营正在启动…",
             Visible = true,
             ContextMenuStrip = BuildMenu(),
