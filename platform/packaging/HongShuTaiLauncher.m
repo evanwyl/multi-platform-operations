@@ -239,10 +239,18 @@
 }
 
 - (void)configureMenu {
-  self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
-  NSImage *statusIcon = NSApp.applicationIconImage;
-  statusIcon.size = NSMakeSize(18, 18);
+  self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
+  NSImage *statusIcon = [NSImage imageWithSystemSymbolName:@"square.grid.2x2.fill"
+                                         accessibilityDescription:@"多平台内容运营"];
+  if (!statusIcon) statusIcon = [NSImage imageNamed:NSImageNameActionTemplate];
+  NSImageSymbolConfiguration *symbolConfiguration =
+      [NSImageSymbolConfiguration configurationWithPointSize:15
+                                                      weight:NSFontWeightSemibold];
+  statusIcon = [statusIcon imageWithSymbolConfiguration:symbolConfiguration] ?: statusIcon;
+  statusIcon.template = YES;
   self.statusItem.button.image = statusIcon;
+  self.statusItem.button.imagePosition = NSImageOnly;
+  self.statusItem.button.imageScaling = NSImageScaleProportionallyDown;
   self.statusItem.button.toolTip = @"多平台内容运营";
 
   NSMenu *menu = [[NSMenu alloc] init];
