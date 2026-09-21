@@ -698,7 +698,7 @@ export default function PlatformApp() {
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">
-            <FileText aria-hidden="true" size={23} weight="bold" />
+            <img src="/app-logo.png" alt="" aria-hidden="true" />
           </span>
           <div>
             <strong>多平台内容运营</strong>
@@ -1369,7 +1369,9 @@ function AuthPage({
     <main className="auth-page">
       <section className="auth-intro">
         <div className="brand inverse">
-          <span className="brand-mark">多</span>
+          <span className="brand-mark">
+            <img src="/app-logo.png" alt="" aria-hidden="true" />
+          </span>
           <div>
             <strong>多平台内容运营</strong>
             <small>一站式内容运营工作台</small>

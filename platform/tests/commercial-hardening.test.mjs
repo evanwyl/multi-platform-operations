@@ -299,13 +299,12 @@ test("implements native JavaScript dialogs required by publish and recovery acti
   assert.match(launcher, /field\.stringValue = defaultText/);
 });
 
-test("uses a fixed template symbol for the macOS menu bar item", async () => {
+test("uses an adaptive monochrome product mark for the macOS menu bar item", async () => {
   const launcher = await source("packaging/HongShuTaiLauncher.m");
   assert.match(launcher, /statusItemWithLength:NSSquareStatusItemLength/);
-  assert.match(launcher, /imageWithSystemSymbolName:@"square\.grid\.2x2\.fill"/);
+  assert.match(launcher, /URLForResource:@"StatusIcon" withExtension:@"png"/);
   assert.match(launcher, /statusIcon\.template = YES/);
   assert.match(launcher, /imageScaling = NSImageScaleProportionallyDown/);
-  assert.doesNotMatch(launcher, /NSApp\.applicationIconImage/);
 });
 
 test("backs up and restores local customer data without unsafe archive paths", async (context) => {
@@ -405,6 +404,8 @@ test("packages a self-contained unsigned macOS app without customer data", async
   assert.match(packager, /runtime\/node/);
   assert.match(packager, /macOS-arm64-unsigned\.dmg/);
   assert.match(packager, /多平台内容运营\.app/);
+  assert.match(packager, /public\/app-logo\.png/);
+  assert.match(packager, /AppLogo\.png/);
   assert.match(infoPlist, /<string>多平台内容运营<\/string>/);
   assert.match(launcher, /ApplicationSupportDirectory/);
   assert.match(launcher, /WKWebView/);
@@ -482,6 +483,11 @@ test("packages a self-contained Windows x64 app without customer data", async ()
   }
   assert.match(project, /net8\.0-windows/);
   assert.match(project, /Microsoft\.Web\.WebView2/);
+  assert.match(project, /<ApplicationIcon>AppIcon\.ico<\/ApplicationIcon>/);
+  assert.match(project, /<EmbeddedResource Include="TrayIcon\.ico"/);
+  assert.match(launcher, /Icon\.ExtractAssociatedIcon/);
+  assert.match(launcher, /Icon = Program\.AppIcon/);
+  assert.match(launcher, /Icon = Program\.TrayIcon/);
   assert.match(launcher, /CoreWebView2Environment/);
   assert.match(launcher, /if \(ready \|\| closing \|\| probing\) return/);
   assert.match(launcher, /finally\s*\{\s*probing = false/);

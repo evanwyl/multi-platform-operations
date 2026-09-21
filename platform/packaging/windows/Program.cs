@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Web.WebView2.Core;
@@ -23,6 +24,19 @@ internal sealed class TeamConfiguration
 
 internal static class Program
 {
+    internal static readonly Icon AppIcon =
+        Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? Application.ExecutablePath)
+        ?? SystemIcons.Application;
+    internal static readonly Icon TrayIcon = LoadTrayIcon();
+
+    private static Icon LoadTrayIcon()
+    {
+        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("TrayIcon.ico");
+        if (stream is null) return AppIcon;
+        using var source = new Icon(stream);
+        return (Icon)source.Clone();
+    }
+
     [STAThread]
     private static void Main()
     {
@@ -67,7 +81,7 @@ internal sealed class OperationsContext : ApplicationContext
 
         tray = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = Program.TrayIcon,
             Text = "多平台内容运营正在启动…",
             Visible = true,
             ContextMenuStrip = BuildMenu(),
@@ -319,6 +333,7 @@ internal sealed class MainWindow : Form
         this.platformUri = platformUri;
         this.token = token;
         Text = "多平台内容运营";
+        Icon = Program.AppIcon;
         Width = 1280;
         Height = 820;
         MinimumSize = new Size(960, 640);
@@ -378,6 +393,7 @@ internal sealed class TeamSetupDialog : Form
     {
         Configuration = current;
         Text = "多平台内容运营 · 使用方式";
+        Icon = Program.AppIcon;
         Width = 560;
         Height = 300;
         FormBorderStyle = FormBorderStyle.FixedDialog;

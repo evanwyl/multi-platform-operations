@@ -79,12 +79,16 @@ button:active:not(:disabled) {
   width: 38px;
   height: 38px;
   border-radius: 10px;
-  background: var(--brand-primary);
+  overflow: hidden;
+  background: #ffffff;
   box-shadow: 0 7px 18px rgb(79 99 216 / 22%);
 }
 
-.brand-mark svg {
-  color: #ffffff;
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .brand strong {
@@ -2425,6 +2429,22 @@ button.platform-tool:hover {
   .shared-workflow ol {
     grid-template-columns: 1fr 1fr;
   }
+}
+
+/* The product logo is an image asset, so theme variants must not repaint it. */
+.brand-mark,
+.auth-intro .brand-mark,
+.brand.inverse .brand-mark {
+  overflow: hidden;
+  background: #ffffff;
+  color: inherit;
+}
+
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* 平台优先主路径：平台选择 → 账号选择 → 账号工作空间 → 内容制作。 */

@@ -18,8 +18,9 @@ export const metadata: Metadata = {
   title: "多平台内容运营",
   description: "本机部署的多平台内容运营、审核与发布工作台。",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: "/app-logo.png",
+    shortcut: "/app-logo.png",
+    apple: "/app-logo.png",
   },
 };
 
