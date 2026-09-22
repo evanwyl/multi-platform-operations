@@ -7,6 +7,7 @@ import { canAccessAccount } from "../../../lib/account-access";
 
 type PublishClaim = {
   id: string;
+  owner_id: string;
   account_id: string;
   account_name: string;
   account_status: string;
@@ -56,7 +57,6 @@ export async function POST(request: Request) {
   if (crossSite) return crossSite;
   const user = await currentUser(request);
   if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
-  if (!can(user, roleGroups.publish)) return forbidden("你没有发布权限");
   const data = (await request.json()) as {
     action?: string;
     claim_id?: string;
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
   const db = database();
   const claim = await db
     .prepare(
-      `SELECT c.id,c.account_id,c.status,c.content_type,c.snapshot,c.publish_images,c.title,c.body,c.tags,c.updated_at,c.wechat_theme,c.wechat_style,
+      `SELECT c.id,c.owner_id,c.account_id,c.status,c.content_type,c.snapshot,c.publish_images,c.title,c.body,c.tags,c.updated_at,c.wechat_theme,c.wechat_style,
     a.name AS account_name,a.status AS account_status,a.platform AS account_platform,a.auth_method,a.external_user_id,a.xhs_user_id,a.xhs_nickname
     FROM claims c JOIN accounts a ON a.id=c.account_id WHERE c.id=? AND a.is_demo=0`,
     )
@@ -84,6 +84,11 @@ export async function POST(request: Request) {
     return Response.json({ error: "发布任务不存在" }, { status: 404 });
   if (!(await canAccessAccount(db, user, claim.account_id)))
     return forbidden("你没有该账号的操作权限");
+  const canPublishAny = can(user, roleGroups.review);
+  const canPublishOwned =
+    claim.owner_id === user.id && can(user, roleGroups.operate);
+  if (!canPublishAny && !canPublishOwned)
+    return forbidden("只有内容负责人或审核员可以执行发布");
 
   const isWechatArticle =
     claim.account_platform === "wechat" &&
