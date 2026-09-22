@@ -502,6 +502,7 @@ export default function PlatformApp() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const backgroundRefreshInFlight = useRef(false);
 
   const loadAuth = useCallback(
     async () => setAuth(await jsonRequest<AuthData>("/api/auth")),
@@ -528,6 +529,33 @@ export default function PlatformApp() {
           );
         });
   }, [auth]);
+  useEffect(() => {
+    if (!auth?.user) return;
+    const refreshTeamState = async () => {
+      if (document.visibilityState !== "visible" || backgroundRefreshInFlight.current)
+        return;
+      backgroundRefreshInFlight.current = true;
+      try {
+        await loadData();
+      } catch {
+        // Background synchronization stays quiet; explicit actions still surface errors.
+      } finally {
+        backgroundRefreshInFlight.current = false;
+      }
+    };
+    const timer = window.setInterval(refreshTeamState, 5_000);
+    const onFocus = () => void refreshTeamState();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refreshTeamState();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [auth?.user, loadData]);
 
   async function authSubmit(
     event: FormEvent<HTMLFormElement>,
@@ -644,6 +672,15 @@ export default function PlatformApp() {
         ),
       }
     : data;
+  const canPublishAnyContent = data.user.roles.some((role) =>
+    ["admin", "reviewer"].includes(role),
+  );
+  const canPublishOwnedContent = data.user.roles.some((role) =>
+    ["admin", "operator"].includes(role),
+  );
+  const publishVisibleToCurrentUser = (claim: Claim) =>
+    canPublishAnyContent ||
+    (canPublishOwnedContent && claim.owner_id === data.user.id);
 
   function goPlatformView(
     target: string,
@@ -847,7 +884,8 @@ export default function PlatformApp() {
                               "queued",
                               "publishing",
                               "failed",
-                            ].includes(claim.status),
+                            ].includes(claim.status) &&
+                            publishVisibleToCurrentUser(claim),
                         ).length ? (
                           <b>
                             {
@@ -860,7 +898,8 @@ export default function PlatformApp() {
                                     "queued",
                                     "publishing",
                                     "failed",
-                                  ].includes(claim.status),
+                                  ].includes(claim.status) &&
+                                  publishVisibleToCurrentUser(claim),
                               ).length
                             }
                           </b>
@@ -981,6 +1020,10 @@ export default function PlatformApp() {
         id="main-content"
         tabIndex={-1}
       >
+        <div className="team-sync-status" role="status" aria-live="polite">
+          <span aria-hidden="true" />
+          团队状态每 5 秒自动同步
+        </div>
         {message ? (
           <div
             className={`toast ${messageHasError ? "bad" : messageHasWarning ? "warn" : ""}`}
@@ -5088,7 +5131,7 @@ function Review({
       <div className="panel-head">
         <div>
           <h2>审核中心</h2>
-          <p>按审核状态查看待处理内容和历史结果；通过后自动进入发布列表</p>
+          <p>按审核状态查看待处理内容和历史结果；通过后由内容负责人完成发布</p>
         </div>
         <span className="count-chip">
           {items.length} / {reviewHistory.length} 条审核记录
@@ -5213,8 +5256,8 @@ function Review({
                           comment: comments[claim.id],
                         },
                         isXiaohongshuClaim(claim)
-                          ? "图文审核已通过，已进入发布列表"
-                          : "文章审核已通过，已进入发布列表",
+                          ? "图文审核已通过，已通知内容负责人发布"
+                          : "文章审核已通过，已通知内容负责人发布",
                       )
                     }
                   >
@@ -5303,9 +5346,15 @@ function Publish({
     claim: Claim;
     html: string;
   } | null>(null);
-  const canPublish = data.user.roles.some((role) =>
-    ["admin", "publisher"].includes(role),
+  const canPublishAnyContent = data.user.roles.some((role) =>
+    ["admin", "reviewer"].includes(role),
   );
+  const canPublishOwnedContent = data.user.roles.some((role) =>
+    ["admin", "operator"].includes(role),
+  );
+  const canPublishClaim = (claim: Claim) =>
+    canPublishAnyContent ||
+    (canPublishOwnedContent && claim.owner_id === data.user.id);
   const pending = data.claims.filter((claim) =>
     ["approved", "queued", "publishing", "failed"].includes(claim.status),
   );
@@ -5451,7 +5500,7 @@ function Publish({
           <div>
             <h2>发布列表</h2>
             <p>
-              发布前确认平台账号、内容负责人和实际发布工作人员；每次发布都保留审核快照。
+              审核通过后由内容负责人确认并发布；每次发布都保留审核快照和实际操作人。
             </p>
           </div>
           <div className="publish-tabs">
@@ -5540,7 +5589,7 @@ function Publish({
                     上次发布失败：{claim.publish_error}
                   </div>
                 ) : null}
-                {filter === "pending" && canPublish && isWechatClaim(claim) ? (
+                {filter === "pending" && canPublishClaim(claim) && isWechatClaim(claim) ? (
                   <div className="wechat-layout-tools">
                     <button
                       className="outline"
@@ -5554,7 +5603,7 @@ function Publish({
                     <span>排版已在审核时冻结；如需修改，请退回创作</span>
                   </div>
                 ) : null}
-                {filter === "pending" && canPublish ? (
+                {filter === "pending" && canPublishClaim(claim) ? (
                   claim.status === "publishing" && claim.publish_recoverable ? (
                     <div className="publish-actions">
                       <span>
@@ -5627,7 +5676,7 @@ function Publish({
                 ) : (
                   <div className="published-note">
                     {filter === "pending"
-                      ? "当前账号只有查看权限，等待发布员处理。"
+                      ? `审核已通过，等待内容负责人 ${claim.owner_name} 或审核员发布。`
                       : `由 ${claim.publisher_name || "工作人员未记录"} 发布；平台保留审核快照、账号和发布时间记录。`}
                   </div>
                 )}
@@ -6764,7 +6813,6 @@ function Settings({
               <select name="role">
                 <option value="operator">内容运营</option>
                 <option value="reviewer">审核员</option>
-                <option value="publisher">发布员</option>
                 <option value="readonly">只读成员</option>
               </select>
             </label>

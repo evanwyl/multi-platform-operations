@@ -29,7 +29,7 @@ test("enforces server-side role boundaries for mutations", async () => {
   const app = await source("app/api/app/route.ts");
   assert.match(permissions, /operate: \["admin", "operator"\]/);
   assert.match(permissions, /review: \["admin", "reviewer"\]/);
-  assert.match(permissions, /publish: \["admin", "publisher"\]/);
+  assert.match(permissions, /publish: \["admin", "reviewer", "operator"\]/);
   assert.match(creation, /can\(user, roleGroups\.operate\)/);
   assert.match(
     trends,

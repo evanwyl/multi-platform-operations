@@ -580,7 +580,8 @@ test("shares content visibility while limiting edits to content operators", asyn
     creationRoute,
     /return canView\(user, claim\) && can\(user, roleGroups\.operate\)/,
   );
-  assert.doesNotMatch(appRoute, /claim\.owner_id !== user\.id/);
+  const saveDraftBlock = appRoute.slice(appRoute.indexOf('action === "save_draft"'));
+  assert.doesNotMatch(saveDraftBlock.slice(0, 900), /claim\.owner_id !== user\.id/);
   assert.doesNotMatch(creationRoute, /claim\.owner_id === user\.id/);
 });
 
@@ -615,6 +616,36 @@ test("shows claim and publish staff identities and records the actual publisher"
   assert.match(publishRoute, /发布人 \$\{user\.name\}/);
   assert.match(database, /\["publisher_id", "TEXT"\]/);
   assert.match(database, /publisher_id IS NULL AND status='published'/);
+});
+
+test("synchronizes team review state and lets owners or reviewers publish", async () => {
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  const appRoute = await readFile(
+    new URL("../app/api/app/route.ts", import.meta.url),
+    "utf8",
+  );
+  const publishRoute = await readFile(
+    new URL("../app/api/publish/route.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /window\.setInterval\(refreshTeamState, 5_000\)/);
+  assert.match(source, /window\.addEventListener\("focus", onFocus\)/);
+  assert.match(source, /document\.addEventListener\("visibilitychange"/);
+  assert.match(source, /团队状态每 5 秒自动同步/);
+  assert.match(source, /canPublishAnyContent/);
+  assert.match(source, /canPublishOwnedContent/);
+  assert.match(source, /等待内容负责人 \$\{claim\.owner_name\} 或审核员发布/);
+  assert.match(publishRoute, /SELECT c\.id,c\.owner_id,c\.account_id/);
+  assert.match(
+    publishRoute,
+    /claim\.owner_id === user\.id && can\(user, roleGroups\.operate\)/,
+  );
+  assert.match(publishRoute, /can\(user, roleGroups\.review\)/);
+  assert.match(publishRoute, /只有内容负责人或审核员可以执行发布/);
+  assert.match(appRoute, /只有内容负责人或审核员可以转入发布队列/);
 });
 
 test("shows complete content task labels and separates review from real publishing", async () => {

@@ -482,7 +482,7 @@ export async function POST(request: Request) {
         { error: "请填写姓名、合法用户名和至少8位密码" },
         { status: 400 },
       );
-    const role = ["operator", "reviewer", "publisher", "readonly"].includes(
+    const role = ["operator", "reviewer", "readonly"].includes(
       String(data.role),
     )
       ? String(data.role)
@@ -948,14 +948,19 @@ export async function POST(request: Request) {
   }
 
   if (action === "queue_publish") {
-    if (!can(user, [...roleGroups.review, "publisher"]))
-      return forbidden("你没有转入发布队列的权限");
     const id = String(data.id ?? "");
     const claim = await db
-      .prepare("SELECT status FROM claims WHERE id=?")
+      .prepare("SELECT owner_id,status FROM claims WHERE id=?")
       .bind(id)
-      .first<{ status: string }>();
-    if (!claim || claim.status !== "approved")
+      .first<{ owner_id: string; status: string }>();
+    if (!claim)
+      return Response.json({ error: "内容任务不存在" }, { status: 404 });
+    const canPublishAny = can(user, roleGroups.review);
+    const canPublishOwned =
+      claim.owner_id === user.id && can(user, roleGroups.operate);
+    if (!canPublishAny && !canPublishOwned)
+      return forbidden("只有内容负责人或审核员可以转入发布队列");
+    if (claim.status !== "approved")
       return Response.json(
         { error: "只有审核通过的内容才能排队" },
         { status: 409 },

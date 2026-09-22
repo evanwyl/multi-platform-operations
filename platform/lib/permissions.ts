@@ -5,7 +5,7 @@ export type AppRole = "admin" | "operator" | "reviewer" | "publisher" | "readonl
 export const roleGroups = {
   operate: ["admin", "operator"],
   review: ["admin", "reviewer"],
-  publish: ["admin", "publisher"],
+  publish: ["admin", "reviewer", "operator"],
   administer: ["admin"],
 } as const satisfies Record<string, readonly AppRole[]>;
 

@@ -91,6 +91,25 @@ button:active:not(:disabled) {
   object-fit: cover;
 }
 
+.team-sync-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  min-height: 20px;
+  margin: -4px 2px 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.team-sync-status > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22a65a;
+  box-shadow: 0 0 0 3px rgb(34 166 90 / 12%);
+}
+
 .brand strong {
   font-size: 16px;
   font-weight: 760;
