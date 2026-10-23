@@ -25,6 +25,7 @@
   --focus-ring: rgb(79 99 216 / 24%);
   --channel-xhs: #d85a62;
   --channel-douyin: #24c8d8;
+  --channel-wechat-channels: #fa9b25;
   --channel-zhihu: #1677ff;
   --channel-wechat: #22a65a;
   --shadow-soft: 0 12px 32px rgb(32 36 43 / 7%);
@@ -2167,6 +2168,14 @@ button.platform-entry-card:hover {
 .channel-wechat {
   --channel: var(--channel-wechat);
   --channel-soft: #f0faf4;
+}
+.channel-douyin {
+  --channel: var(--channel-douyin);
+  --channel-soft: #effcfd;
+}
+.channel-wechat_channels {
+  --channel: var(--channel-wechat-channels);
+  --channel-soft: #fff8ee;
 }
 .platform-entry-top {
   display: flex;

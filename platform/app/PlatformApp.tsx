@@ -28,7 +28,12 @@ import {
 } from "@phosphor-icons/react";
 
 type User = { id: string; name: string; username: string; roles: string[]; account_ids?: string[] };
-type PlatformId = "xiaohongshu" | "zhihu" | "wechat";
+type PlatformId =
+  | "xiaohongshu"
+  | "zhihu"
+  | "wechat"
+  | "douyin"
+  | "wechat_channels";
 type Account = {
   id: string;
   name: string;
@@ -96,6 +101,18 @@ type CreativeDraft = {
   tags: string[];
   image_prompts: ImagePrompt[];
   creative_note: string;
+  video_options?: {
+    mode?: "publish" | "draft";
+  };
+};
+type MediaAsset = {
+  id: string;
+  kind: "video" | "cover_landscape" | "cover_portrait" | "subtitle";
+  original_name: string;
+  mime_type: string;
+  size: number;
+  sha256: string;
+  created_at: string;
 };
 type CreativeVersion = {
   id: string;
@@ -150,7 +167,12 @@ type Claim = {
   account_color: string;
   account_platform?: PlatformId;
   content_type?:
-    "xiaohongshu_note" | "zhihu_article" | "zhihu_answer" | "wechat_article";
+    | "xiaohongshu_note"
+    | "zhihu_article"
+    | "zhihu_answer"
+    | "wechat_article"
+    | "douyin_video"
+    | "wechat_channels_video";
   external_content_id?: string;
   published_url?: string;
   owner_id: string;
@@ -169,6 +191,7 @@ type Claim = {
   version_number?: number;
   generated_at?: string;
   publish_images?: string[];
+  media_assets?: MediaAsset[];
   publish_error?: string;
   published_at?: string;
   publisher_id?: string;
@@ -185,6 +208,10 @@ type Claim = {
     content_type?: string;
     wechat_theme?: WechatTheme;
     wechat_style?: Partial<WechatStyle>;
+    media_assets?: MediaAsset[];
+    creative?: {
+      video_options?: { mode?: "publish" | "draft" };
+    };
   } | null;
 };
 type Log = {
@@ -372,6 +399,8 @@ const claimStatus: Record<string, string> = {
   queued: "发布队列",
   publishing: "发布中",
   published: "已发布",
+  drafted: "已存草稿",
+  scheduled: "已定时",
   failed: "发布失败",
 };
 const sampleProcessingStatus: Record<string, string> = {
@@ -436,10 +465,18 @@ function platformLabel(platform?: string) {
     ? "知乎"
     : platform === "wechat"
       ? "微信公众号"
-      : "小红书";
+      : platform === "douyin"
+        ? "抖音"
+        : platform === "wechat_channels"
+          ? "视频号"
+          : "小红书";
 }
 function accountIdentitySummary(account: Account) {
   if (account.platform === "wechat") return "微信公众号账号";
+  if (account.platform === "douyin" || account.platform === "wechat_channels")
+    return account.external_user_id
+      ? "已绑定独立浏览器登录身份"
+      : `尚未绑定${platformLabel(account.platform)}登录`;
   if (account.platform === "zhihu")
     return account.external_user_id ? "已配置知乎账号标识" : "尚未配置知乎授权";
   return account.xhs_red_id
@@ -461,7 +498,18 @@ function isWechatClaim(claim?: Claim) {
   );
 }
 function isXiaohongshuClaim(claim?: Claim) {
-  return !isZhihuClaim(claim) && !isWechatClaim(claim);
+  return (
+    claim?.content_type === "xiaohongshu_note" ||
+    claim?.account_platform === "xiaohongshu"
+  );
+}
+function isVideoClaim(claim?: Claim) {
+  return (
+    claim?.content_type === "douyin_video" ||
+    claim?.content_type === "wechat_channels_video" ||
+    claim?.account_platform === "douyin" ||
+    claim?.account_platform === "wechat_channels"
+  );
 }
 
 function blankCreative(claim?: Claim): CreativeDraft {
@@ -483,8 +531,11 @@ function blankCreative(claim?: Claim): CreativeDraft {
     tags: Array.isArray(saved?.tags) ? saved.tags : (claim?.tags ?? []),
     image_prompts: currentPrompts.slice(0, 6),
     creative_note: saved?.creative_note ?? "",
+    video_options: saved?.video_options ?? { mode: "publish" },
   };
-  return isZhihuClaim(claim) ? creative : withCoverTitle(creative);
+  return isZhihuClaim(claim) || isVideoClaim(claim)
+    ? creative
+    : withCoverTitle(creative);
 }
 
 export default function PlatformApp() {
@@ -498,7 +549,13 @@ export default function PlatformApp() {
   const [scopeAccountId, setScopeAccountId] = useState("");
   const [expandedPlatforms, setExpandedPlatforms] = useState<
     Record<PlatformId, boolean>
-  >({ xiaohongshu: true, zhihu: false, wechat: false });
+  >({
+    xiaohongshu: true,
+    zhihu: false,
+    wechat: false,
+    douyin: false,
+    wechat_channels: false,
+  });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -767,10 +824,28 @@ export default function PlatformApp() {
           </div>
           <div className="nav-group platform-accordion-group">
             <span className="nav-group-label">平台选择</span>
-            {(["xiaohongshu", "zhihu", "wechat"] as const).map((platform) => {
+            {(
+              [
+                "xiaohongshu",
+                "zhihu",
+                "wechat",
+                "douyin",
+                "wechat_channels",
+              ] as const
+            ).map((platform) => {
               const xhs = platform === "xiaohongshu";
+              const videoPlatform =
+                platform === "douyin" || platform === "wechat_channels";
               const name = platformLabel(platform);
-              const glyph = xhs ? "小" : platform === "zhihu" ? "知" : "微";
+              const glyph = xhs
+                ? "小"
+                : platform === "zhihu"
+                  ? "知"
+                  : platform === "wechat"
+                    ? "微"
+                    : platform === "douyin"
+                      ? "抖"
+                      : "视";
               const expanded = expandedPlatforms[platform];
               const accounts = data.accounts.filter(
                 (account) => (account.platform || "xiaohongshu") === platform,
@@ -834,7 +909,7 @@ export default function PlatformApp() {
                         onClick={() => goPlatformView("topics", platform)}
                       >
                         <Lightbulb aria-hidden="true" size={15} />
-                        选题中心
+                        {videoPlatform ? "视频任务" : "选题中心"}
                       </button>
                       <button
                         className={
@@ -845,7 +920,7 @@ export default function PlatformApp() {
                         onClick={() => goPlatformView("content", platform)}
                       >
                         <FileText aria-hidden="true" size={15} />
-                        我的内容
+                        {videoPlatform ? "视频内容" : "我的内容"}
                       </button>
                       <button
                         className={view === "review" && active ? "active" : ""}
@@ -1060,9 +1135,9 @@ export default function PlatformApp() {
                 reloadApp={loadData}
                 notify={setMessage}
               />
-            ) : (
+            ) : scopePlatform === "xiaohongshu" || !scopePlatform ? (
               <Trends reloadApp={loadData} notify={setMessage} />
-            )}
+            ) : null}
           </div>
           {view === "topics" && (
             <Topics
@@ -1176,7 +1251,7 @@ function AccountWorkspace({
     (claim) => claim.status === "review",
   ).length;
   const publishedCount = claims.filter(
-    (claim) => ["published", "drafted"].includes(claim.status),
+    (claim) => ["published", "drafted", "scheduled"].includes(claim.status),
   ).length;
   const accountIdentifier = xhs
     ? account.xhs_red_id || account.xhs_user_id || account.external_user_id
@@ -1502,7 +1577,7 @@ function Dashboard({
       ["writing", "revision"].includes(claim.status),
   ).length;
   const published = data.claims.filter(
-    (claim) => ["published", "drafted"].includes(claim.status),
+    (claim) => ["published", "drafted", "scheduled"].includes(claim.status),
   ).length;
   const visibleClaims = data.claims.slice(0, 5);
   return (
@@ -3395,7 +3470,10 @@ function Topics({
     {
       id: "published",
       label: "已完成",
-      matches: (topic: Topic) => ["published", "drafted"].includes(topic.claim_status || ""),
+      matches: (topic: Topic) =>
+        ["published", "drafted", "scheduled"].includes(
+          topic.claim_status || "",
+        ),
     },
   ];
   const activeGroup =
@@ -3459,7 +3537,33 @@ function Topics({
             emptyText:
               "可以先打开文章选题搜索，也可在上方手动添加公众号文章主题。",
           }
-        : {
+        : platform === "douyin" || platform === "wechat_channels"
+          ? {
+              glyph: platform === "douyin" ? "抖" : "视",
+              kicker: `${platformLabel(platform)}视频任务 · 发布 V1`,
+              headline: `建立待发布的${platformLabel(platform)}视频任务`,
+              intro:
+                "当前版本负责上传成片、填写发布文案、团队审核与真实发布；视频翻译和二次加工后续通过独立模块接入。",
+              state: "视频发布已接入",
+              newKicker: `新建${platformLabel(platform)}视频任务`,
+              newTitle: "记录一个待上传的视频内容",
+              titlePlaceholder: "输入视频标题或内部任务名",
+              urlPlaceholder: "素材来源或参考链接（选填）",
+              addLabel: "添加视频任务",
+              libraryTitle: `${platformLabel(platform)}视频任务库`,
+              libraryDesc:
+                "视频文件、发布文案、审核快照和登录身份均按账号隔离保存",
+              itemLabel: "视频发布任务",
+              sourceLabel: "素材来源",
+              sourceName: "人工上传",
+              summaryFallback:
+                "人工建立的视频发布任务，认领后上传成片并补充发布文案。",
+              directionFallback: "认领时补充发布角度",
+              footer: "当前支持 MP4/MOV 成片发布",
+              emptyName: platformLabel(platform),
+              emptyText: "先在上方建立视频任务，再认领到对应账号上传成片。",
+            }
+          : {
             glyph: "小",
             kicker: "小红书选题中心 · 图文笔记",
             headline: "从真实爆款样本沉淀小红书图文选题",
@@ -3959,6 +4063,8 @@ function Content({
   const [saving, setSaving] = useState(false);
   const [coverGenerating, setCoverGenerating] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
+  const [uploadingMedia, setUploadingMedia] = useState<string | null>(null);
+  const [mediaProgress, setMediaProgress] = useState(0);
   const [wechatLayout, setWechatLayout] = useState<{
     html: string;
     theme: WechatTheme;
@@ -4068,7 +4174,9 @@ function Content({
     try {
       await creationRequest(
         { action: "save", creative },
-        isZhihuClaim(selected)
+        isVideoClaim(selected)
+          ? "视频发布信息已保存"
+          : isZhihuClaim(selected)
           ? "知乎专栏草稿已保存"
           : isWechatClaim(selected)
             ? "公众号草稿已保存"
@@ -4095,7 +4203,9 @@ function Content({
     }
     await action(
       { action: "submit_review", id: selected.id },
-      isZhihuClaim(selected)
+      isVideoClaim(selected)
+        ? "视频、文案和发布方式已冻结并提交审核"
+        : isZhihuClaim(selected)
         ? "知乎专栏已保存并提交审核"
         : isWechatClaim(selected)
           ? "公众号文章已保存并提交审核"
@@ -4176,6 +4286,60 @@ function Content({
     }
   }
 
+  async function uploadMediaAsset(
+    file: File | undefined,
+    kind: MediaAsset["kind"],
+  ) {
+    if (!selected || !editable || !file) return;
+    setUploadingMedia(kind);
+    setMediaProgress(0);
+    notify("");
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        const query = new URLSearchParams({ claim_id: selected.id, kind });
+        request.open("POST", `/api/media?${query.toString()}`);
+        request.setRequestHeader("x-file-name", file.name);
+        request.setRequestHeader(
+          "content-type",
+          file.type || "application/octet-stream",
+        );
+        request.upload.onprogress = (event) => {
+          if (event.lengthComputable)
+            setMediaProgress(Math.round((event.loaded / event.total) * 100));
+        };
+        request.onload = () => {
+          if (request.status >= 200 && request.status < 300) resolve();
+          else {
+            try {
+              reject(
+                new Error(
+                  (JSON.parse(request.responseText) as { error?: string })
+                    .error || "媒体上传失败",
+                ),
+              );
+            } catch {
+              reject(new Error("媒体上传失败"));
+            }
+          }
+        };
+        request.onerror = () => reject(new Error("媒体上传连接失败"));
+        request.send(file);
+      });
+      await reload();
+      notify(
+        kind === "video"
+          ? `视频 ${file.name} 已上传，提交审核后将冻结该文件`
+          : `封面 ${file.name} 已上传`,
+      );
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "媒体上传失败");
+    } finally {
+      setUploadingMedia(null);
+      setMediaProgress(0);
+    }
+  }
+
   async function loadVersions() {
     if (!selected) return;
     try {
@@ -4228,8 +4392,15 @@ function Content({
   );
   const longArticle = isZhihuClaim(selected);
   const wechatArticle = isWechatClaim(selected);
+  const videoContent = isVideoClaim(selected);
   const articleContent = longArticle || wechatArticle;
-  const titleLimit = longArticle ? 100 : wechatArticle ? 64 : 20;
+  const titleLimit = longArticle
+    ? 100
+    : wechatArticle
+      ? 64
+      : videoContent
+        ? 55
+        : 20;
   const selectedPlatformName = platformLabel(selectedAccount?.platform);
   const accountValue = (item?: string | number | null) =>
     item === undefined || item === null || item === "" ? "暂无" : item;
@@ -4267,7 +4438,8 @@ function Content({
               ),
             ).length;
             const publishedCount = claims.filter(
-              (claim) => ["published", "drafted"].includes(claim.status),
+              (claim) =>
+                ["published", "drafted", "scheduled"].includes(claim.status),
             ).length;
             return (
               <button
@@ -4463,11 +4635,14 @@ function Content({
                   : selected.status === "published"
                     ? "内容已经发布，可到发布列表查看记录。"
                     : selected.status === "drafted"
-                      ? "内容已经写入公众号草稿箱，可到完成记录查看。"
-                    : "内容已经进入发布流程，请到发布列表继续处理。"}
+                      ? `内容已经写入${platformLabel(selected.account_platform)}草稿，可到完成记录查看。`
+                      : selected.status === "scheduled"
+                        ? "内容已经提交定时发布，可到完成记录查看。"
+                      : "内容已经进入发布流程，请到发布列表继续处理。"}
               </span>
             </div>
           ) : null}
+          {!videoContent ? (
           <section className="creative-command">
             <div>
               <span className="section-kicker">
@@ -4535,6 +4710,19 @@ function Content({
               </div>
             ) : null}
           </section>
+          ) : (
+            <section className="creative-command video-publish-intro">
+              <div>
+                <span className="section-kicker">
+                  视频发布 · {selectedPlatformName}
+                </span>
+                <h2>上传已经制作完成的视频，再填写发布文案</h2>
+                <p>
+                  本版本不改动视频内容。成片、封面与文案会一起进入审核快照，审核通过后由负责人或审核员执行真实发布。
+                </p>
+              </div>
+            </section>
+          )}
 
           <section className="panel creative-editor">
             <div className="editor-head">
@@ -4610,7 +4798,9 @@ function Content({
               </div>
             ) : null}
             <label>
-              {longArticle
+              {videoContent
+                ? "视频标题"
+                : longArticle
                 ? "专栏标题"
                 : wechatArticle
                   ? "公众号标题"
@@ -4623,7 +4813,7 @@ function Content({
                 value={creative.title}
                 onChange={(event) =>
                   setCreative(
-                    articleContent
+                    articleContent || videoContent
                       ? { ...creative, title: event.target.value }
                       : withCoverTitle({
                           ...creative,
@@ -4664,7 +4854,105 @@ function Content({
                 placeholder="多个标签用空格分隔"
               />
             </label>
-            {!longArticle ? (
+            {videoContent ? (
+              <section className="review-image-uploader video-media-uploader">
+                <div>
+                  <strong>发布视频（必选）</strong>
+                  <span>
+                    支持 MP4、MOV，最大 8GB。上传时会显示进度；提交审核后将冻结文件指纹，发布页不能临时替换。
+                  </span>
+                </div>
+                {selected.media_assets?.filter((asset) => asset.kind === "video")
+                  .map((asset) => (
+                    <div className="media-asset-summary" key={asset.id}>
+                      <strong>{asset.original_name}</strong>
+                      <span>
+                        {(asset.size / 1024 / 1024).toFixed(1)} MB · SHA-256 {asset.sha256.slice(0, 12)}…
+                      </span>
+                    </div>
+                  ))}
+                {editable ? (
+                  <label className="outline upload-button">
+                    {uploadingMedia === "video"
+                      ? `视频上传中 ${mediaProgress}%`
+                      : selected.media_assets?.some(
+                            (asset) => asset.kind === "video",
+                          )
+                        ? "替换发布视频"
+                        : "选择发布视频"}
+                    <input
+                      type="file"
+                      accept="video/mp4,video/quicktime,.mp4,.mov"
+                      disabled={Boolean(uploadingMedia) || saving || creating}
+                      onChange={(event) => {
+                        void uploadMediaAsset(event.target.files?.[0], "video");
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                ) : null}
+                <div>
+                  <strong>视频封面（选填）</strong>
+                  <span>
+                    抖音优先使用竖版封面，视频号优先使用横版封面；未上传时由平台从视频中选择。
+                  </span>
+                </div>
+                <div className="media-cover-actions">
+                  <label className="outline upload-button">
+                    {uploadingMedia === "cover_portrait"
+                      ? `竖版上传中 ${mediaProgress}%`
+                      : "上传竖版封面"}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      disabled={!editable || Boolean(uploadingMedia)}
+                      onChange={(event) => {
+                        void uploadMediaAsset(
+                          event.target.files?.[0],
+                          "cover_portrait",
+                        );
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                  <label className="outline upload-button">
+                    {uploadingMedia === "cover_landscape"
+                      ? `横版上传中 ${mediaProgress}%`
+                      : "上传横版封面"}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      disabled={!editable || Boolean(uploadingMedia)}
+                      onChange={(event) => {
+                        void uploadMediaAsset(
+                          event.target.files?.[0],
+                          "cover_landscape",
+                        );
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+                <label>
+                  发布方式
+                  <select
+                    value={creative.video_options?.mode || "publish"}
+                    disabled={!editable}
+                    onChange={(event) =>
+                      setCreative({
+                        ...creative,
+                        video_options: {
+                          mode: event.target.value as "publish" | "draft",
+                        },
+                      })
+                    }
+                  >
+                    <option value="publish">审核后直接发布</option>
+                    <option value="draft">保存到平台草稿</option>
+                  </select>
+                </label>
+              </section>
+            ) : !longArticle ? (
               <section className="review-image-uploader">
                 <div>
                   <strong>
@@ -4756,7 +5044,9 @@ function Content({
               >
                 {saving
                   ? "保存中…"
-                  : longArticle
+                  : videoContent
+                    ? "保存视频发布信息"
+                    : longArticle
                     ? "保存专栏草稿"
                     : wechatArticle
                       ? "保存公众号草稿"
@@ -4769,15 +5059,22 @@ function Content({
                   saving ||
                   creating ||
                   uploadingImages ||
+                  Boolean(uploadingMedia) ||
                   !editable ||
                   !creative.title ||
                   !creative.body ||
                   (isXiaohongshuClaim(selected) &&
-                    !selected.publish_images?.length)
+                    !selected.publish_images?.length) ||
+                  (videoContent &&
+                    !selected.media_assets?.some(
+                      (asset) => asset.kind === "video",
+                    ))
                 }
                 onClick={saveAndSubmit}
               >
-                {longArticle
+                {videoContent
+                  ? "保存视频任务并提交审核"
+                  : longArticle
                   ? "保存专栏并提交审核"
                   : wechatArticle
                     ? "选择排版后提交审核"
@@ -4787,7 +5084,7 @@ function Content({
           </section>
         </section>
 
-        {!longArticle ? (
+        {!longArticle && !videoContent ? (
           <aside className="panel visual-builder post-image-prompts">
             <div className="visual-builder-head">
               <div>
@@ -5186,6 +5483,26 @@ function Review({
                   查看最终公众号排版
                 </button>
               ) : null}
+              {isVideoClaim(claim) ? (
+                <div className="media-asset-summary review-video-summary">
+                  {claim.media_assets?.find((asset) => asset.kind === "video") ? (
+                    <>
+                      <strong>
+                        {
+                          claim.media_assets.find(
+                            (asset) => asset.kind === "video",
+                          )?.original_name
+                        }
+                      </strong>
+                      <span>
+                        已核对视频文件 · 提交通过后冻结文件指纹
+                      </span>
+                    </>
+                  ) : (
+                    <strong>缺少发布视频，不能通过</strong>
+                  )}
+                </div>
+              ) : null}
               {claim.publish_images?.length ? (
                 <div className="review-image-grid review-center-images">
                   {claim.publish_images.map((_, index) => (
@@ -5204,7 +5521,9 @@ function Review({
                 </div>
               ) : (
                 <div className="review-missing-images">
-                  {isZhihuClaim(claim) || isWechatClaim(claim)
+                  {isVideoClaim(claim)
+                    ? "视频任务不使用图文审核图片"
+                    : isZhihuClaim(claim) || isWechatClaim(claim)
                     ? `${isWechatClaim(claim) ? "公众号" : "知乎"}文章正文配图为可选项，可直接审核`
                     : "缺少审核图片，不能通过"}
                 </div>
@@ -5245,7 +5564,11 @@ function Review({
                     disabled={
                       busy ||
                       (isXiaohongshuClaim(claim) &&
-                        !claim.publish_images?.length)
+                        !claim.publish_images?.length) ||
+                      (isVideoClaim(claim) &&
+                        !claim.media_assets?.some(
+                          (asset) => asset.kind === "video",
+                        ))
                     }
                     onClick={() =>
                       action(
@@ -5255,13 +5578,17 @@ function Review({
                           result: "approve",
                           comment: comments[claim.id],
                         },
-                        isXiaohongshuClaim(claim)
+                        isVideoClaim(claim)
+                          ? "视频审核已通过，已通知内容负责人发布"
+                          : isXiaohongshuClaim(claim)
                           ? "图文审核已通过，已通知内容负责人发布"
                           : "文章审核已通过，已通知内容负责人发布",
                       )
                     }
                   >
-                    {isZhihuClaim(claim) || isWechatClaim(claim)
+                    {isVideoClaim(claim)
+                      ? "通过视频并转入发布"
+                      : isZhihuClaim(claim) || isWechatClaim(claim)
                       ? "通过文章并转入发布"
                       : "通过图文并转入发布"}
                   </button>
@@ -5358,7 +5685,9 @@ function Publish({
   const pending = data.claims.filter((claim) =>
     ["approved", "queued", "publishing", "failed"].includes(claim.status),
   );
-  const published = data.claims.filter((claim) => ["published", "drafted"].includes(claim.status));
+  const published = data.claims.filter((claim) =>
+    ["published", "drafted", "scheduled"].includes(claim.status),
+  );
   const items = filter === "pending" ? pending : published;
 
   async function previewWechatLayout(claim: Claim) {
@@ -5402,13 +5731,21 @@ function Publish({
     setWorking(claim.id);
     notify("");
     try {
-      await jsonRequest("/api/publish", {
+      const result = await jsonRequest<{ status?: string }>("/api/publish", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "publish_now", claim_id: claim.id }),
       });
       await reload();
-      notify(isWechatClaim(claim) ? "内容已写入公众号草稿箱并回读核验" : `内容已通过${platform}发布服务发布成功`);
+      notify(
+        isWechatClaim(claim)
+          ? "内容已写入公众号草稿箱并回读核验"
+          : result.status === "drafted"
+            ? `内容已保存到${platform}草稿`
+            : result.status === "scheduled"
+              ? `${platform}定时发布任务已提交`
+              : `内容已通过${platform}发布服务发布成功`,
+      );
     } catch (error) {
       await reload();
       notify(error instanceof Error ? error.message : "发布失败");
@@ -5563,7 +5900,9 @@ function Publish({
                     {claim.publisher_name || `${data.user.name}（当前）`}
                   </span>
                   <span>
-                    {isWechatClaim(claim)
+                    {isVideoClaim(claim)
+                      ? `${claim.publish_snapshot?.media_assets?.some((asset) => asset.kind === "video") ? "视频已冻结" : "缺少视频"} · ${claim.publish_snapshot?.creative?.video_options?.mode === "draft" ? "保存草稿" : "直接发布"}`
+                      : isWechatClaim(claim)
                       ? `${claim.publish_images?.length || 0} 张配图 · 首图为封面`
                       : isZhihuClaim(claim)
                         ? "专栏文本审核"
@@ -5629,7 +5968,9 @@ function Publish({
                   ) : (
                     <div className="publish-actions">
                       <span>
-                        {isWechatClaim(claim)
+                        {isVideoClaim(claim)
+                          ? `将上传审核冻结的视频和文案，并${claim.publish_snapshot?.creative?.video_options?.mode === "draft" ? "保存到平台草稿" : "执行真实发布"}`
+                          : isWechatClaim(claim)
                           ? claim.publish_snapshot?.images?.length ||
                             claim.publish_images?.length
                             ? "将审核冻结内容写入公众号草稿箱，首张为封面"
@@ -5667,8 +6008,13 @@ function Publish({
                             ? "确认后重新发布"
                             : isWechatClaim(claim)
                               ? "确认并写入草稿箱"
-                              : isZhihuClaim(claim)
-                                ? "确认并发布专栏"
+                            : isZhihuClaim(claim)
+                              ? "确认并发布专栏"
+                              : isVideoClaim(claim)
+                                ? claim.publish_snapshot?.creative
+                                    ?.video_options?.mode === "draft"
+                                  ? "确认并保存平台草稿"
+                                  : "确认并发布视频"
                                 : "确认并发布审核图文"}
                       </button>
                     </div>
@@ -5822,6 +6168,7 @@ function Accounts({
     text: string;
   } | null>(null);
   const [zhihuLoginId, setZhihuLoginId] = useState("");
+  const [socialLoginId, setSocialLoginId] = useState("");
   const [wechatAccount, setWechatAccount] = useState<Account | null>(null);
   const [wechatBusy, setWechatBusy] = useState(false);
 
@@ -5893,6 +6240,41 @@ function Accounts({
     }
   }
 
+  async function socialLogin(account: Account) {
+    const completing = socialLoginId === account.id;
+    setConnecting(account.id);
+    notify("");
+    try {
+      const result = await jsonRequest<{
+        opened?: boolean;
+        authenticated?: boolean;
+      }>("/api/social-video", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: completing ? "browser_login_complete" : "browser_login",
+          account_id: account.id,
+        }),
+      });
+      if (!completing) {
+        setSocialLoginId(account.id);
+        notify(
+          `${platformLabel(account.platform)}登录窗口已打开；完成扫码登录后回到这里点击“我已登录，完成绑定”`,
+        );
+      } else if (result.authenticated) {
+        setSocialLoginId("");
+        notify(`${account.name} 的${platformLabel(account.platform)}登录已保存`);
+        await reload();
+      } else {
+        notify("尚未检测到登录，请在浏览器窗口完成扫码登录后重试");
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "平台浏览器登录失败");
+    } finally {
+      setConnecting(null);
+    }
+  }
+
   const isAdmin = data.user.roles.includes("admin");
   const currentPlatformName = platformLabel(platform);
   const accountHelp =
@@ -5900,7 +6282,9 @@ function Accounts({
       ? "账号创建后通过独立浏览器扫码绑定，登录凭据只保存在团队主机。"
       : platform === "zhihu"
         ? "账号创建后点击“登录知乎”，在独立浏览器窗口完成正常登录；登录态只保存在团队主机。"
-        : "账号创建后配置微信公众号开发者接口；每个账号独立保存授权、内容和草稿记录。";
+        : platform === "wechat"
+          ? "账号创建后配置微信公众号开发者接口；每个账号独立保存授权、内容和草稿记录。"
+          : `账号创建后在独立浏览器窗口登录${currentPlatformName}；登录态与其他账号相互隔离，只保存在团队主机。`;
   return (
     <div className="page-stack">
       <div className="accounts-toolbar">
@@ -5942,6 +6326,8 @@ function Accounts({
               configureWechat={
                 isAdmin ? () => setWechatAccount(account) : undefined
               }
+              loginSocial={isAdmin ? () => socialLogin(account) : undefined}
+              socialLoginPending={socialLoginId === account.id}
             />
           ))}
         </div>
@@ -6228,6 +6614,8 @@ function AccountOverview({
   loginZhihu,
   loginPending,
   configureWechat,
+  loginSocial,
+  socialLoginPending,
 }: {
   account: Account;
   claims: Claim[];
@@ -6241,6 +6629,8 @@ function AccountOverview({
   loginZhihu?: () => void;
   loginPending?: boolean;
   configureWechat?: () => void;
+  loginSocial?: () => void;
+  socialLoginPending?: boolean;
 }) {
   const inProgress = claims.filter((claim) =>
     ["writing", "revision", "review"].includes(claim.status),
@@ -6248,11 +6638,69 @@ function AccountOverview({
   const waiting = claims.filter((claim) =>
     ["approved", "queued", "publishing"].includes(claim.status),
   ).length;
-  const published = claims.filter(
-    (claim) => claim.status === "published" || (account.platform === "wechat" && claim.status === "drafted"),
+  const published = claims.filter((claim) =>
+    ["published", "drafted", "scheduled"].includes(claim.status),
   ).length;
   const value = (item?: string | number | null) =>
     item === undefined || item === null || item === "" ? "暂无" : item;
+  if (
+    account.platform === "douyin" ||
+    account.platform === "wechat_channels"
+  )
+    return (
+      <article className="panel account-card">
+        <div className="account-profile-head">
+          <span className="large-avatar" style={{ background: account.color }}>
+            {account.platform === "douyin" ? "抖" : "视"}
+          </span>
+          <div>
+            <h2>{account.external_display_name || account.name}</h2>
+            <p>
+              {account.status === "online"
+                ? "独立浏览器登录身份已绑定"
+                : `尚未登录${platformLabel(account.platform)}`}
+            </p>
+            <small>Cookie 只保存在团队主机，不会写入业务数据库</small>
+          </div>
+          <span
+            className={`account-state ${account.status === "online" ? "" : "error"}`}
+          >
+            <i></i>
+            {account.status === "online" ? "已登录" : "待登录"}
+          </span>
+        </div>
+        <p className="account-bio">
+          审核通过后会再次核对登录身份，再通过可见浏览器上传成片和文案；提交结果不明确时会停止重试并要求人工核验。
+        </p>
+        <div className="platform-stats">
+          <span>创作中 <strong>{inProgress}</strong></span>
+          <span>待发布 <strong>{waiting}</strong></span>
+          <span>完成记录 <strong>{published}</strong></span>
+        </div>
+        {canManage ? (
+          <div className="account-buttons">
+            <button className="outline" onClick={editStrategy}>
+              内容定位
+            </button>
+            <button
+              className="primary"
+              disabled={connecting}
+              onClick={loginSocial}
+            >
+              {connecting
+                ? "正在检测…"
+                : socialLoginPending
+                  ? "我已登录，完成绑定"
+                  : account.status === "online"
+                    ? `重新登录${platformLabel(account.platform)}`
+                    : `登录${platformLabel(account.platform)}`}
+            </button>
+          </div>
+        ) : (
+          <p className="sync-time">只有管理员可以登录和管理平台账号。</p>
+        )}
+      </article>
+    );
   if (account.platform === "wechat")
     return (
       <article className="panel account-card">
@@ -6934,7 +7382,8 @@ function Empty({ title, text }: { title: string; text: string }) {
 function toneFor(status: string) {
   if (["review"].includes(status)) return "amber";
   if (["writing"].includes(status)) return "blue";
-  if (["approved", "queued", "drafted", "published"].includes(status)) return "violet";
+  if (["approved", "queued", "drafted", "scheduled", "published"].includes(status))
+    return "violet";
   return "rose";
 }
 function contentStageLabel(claim: Claim) {
@@ -6944,7 +7393,9 @@ function contentStageLabel(claim: Claim) {
   if (claim.status === "review") return "待审核";
   if (["approved", "queued"].includes(claim.status)) return "待发布";
   if (claim.status === "publishing") return "发布中";
-  if (claim.status === "drafted") return "已入公众号草稿箱";
+  if (claim.status === "drafted")
+    return isWechatClaim(claim) ? "已入公众号草稿箱" : "已保存平台草稿";
+  if (claim.status === "scheduled") return "已定时";
   if (claim.status === "published") return "已发布";
   if (claim.status === "failed") return "发布失败";
   return claim.status_label;

@@ -22,6 +22,7 @@ const statusLabels: Record<string, string> = {
   queued: "发布队列",
   publishing: "发布中",
   drafted: "已入公众号草稿箱",
+  scheduled: "已定时",
   published: "已发布",
   failed: "发布失败",
 };
@@ -86,7 +87,7 @@ export async function GET(request: Request) {
     return response as Response;
   }
   const db = database();
-  const [accounts, topics, claims, logs, users, aiSettings] = await Promise.all(
+  const [accounts, topics, claims, logs, users, mediaAssets, aiSettings] = await Promise.all(
     [
       db
         .prepare(
@@ -128,6 +129,11 @@ export async function GET(request: Request) {
       db
         .prepare(
           "SELECT id,name,username,roles,status,created_at FROM users WHERE status='active' ORDER BY created_at",
+        )
+        .all<DbRow>(),
+      db
+        .prepare(
+          "SELECT id,claim_id,kind,source,original_name,mime_type,sha256,size,width,height,duration,created_at FROM media_assets ORDER BY created_at DESC",
         )
         .all<DbRow>(),
       runtimeAI("settings").catch(() => ({
@@ -172,7 +178,10 @@ export async function GET(request: Request) {
     })),
     claims: visibleClaims.map((claim) => ({
       ...claim,
-      status_label: statusLabels[String(claim.status)] ?? claim.status,
+      status_label:
+        claim.status === "drafted" && claim.content_type !== "wechat_article"
+          ? "已保存平台草稿"
+          : statusLabels[String(claim.status)] ?? claim.status,
       publish_recoverable:
         claim.status === "publishing" &&
         Date.now() - Date.parse(String(claim.updated_at)) >= 8 * 60 * 1000,
@@ -183,6 +192,9 @@ export async function GET(request: Request) {
         ? JSON.parse(String(claim.snapshot))
         : null,
       wechat_style: JSON.parse(String(claim.wechat_style || "{}")),
+      media_assets: mediaAssets.results.filter(
+        (asset) => String(asset.claim_id) === String(claim.id),
+      ),
     })),
     logs: logs.results,
     users: users.results.map((row) => ({
@@ -384,7 +396,11 @@ export async function POST(request: Request) {
         ? "知乎"
         : platform === "wechat"
           ? "微信公众号"
-          : "小红书";
+          : platform === "douyin"
+            ? "抖音"
+            : platform === "wechat_channels"
+              ? "视频号"
+              : "小红书";
     if ((count?.total ?? 0) >= 5)
       return Response.json(
         { error: `当前版本最多管理5个${label}账号` },
@@ -604,7 +620,7 @@ export async function POST(request: Request) {
       .run();
     await audit(
       user.id,
-      `创建${platform === "zhihu" ? "知乎" : "小红书"}选题`,
+      `创建${platform === "zhihu" ? "知乎" : platform === "wechat" ? "公众号" : platform === "douyin" ? "抖音视频" : platform === "wechat_channels" ? "视频号视频" : "小红书"}选题`,
       "topic",
       id,
       title,
@@ -722,7 +738,7 @@ export async function POST(request: Request) {
             user.id,
             String(data.angle ?? ""),
             contentTypeForPlatform(
-              account.platform as "xiaohongshu" | "zhihu" | "wechat",
+              account.platform as "xiaohongshu" | "zhihu" | "wechat" | "douyin" | "wechat_channels",
             ),
             now,
             now,
@@ -754,9 +770,9 @@ export async function POST(request: Request) {
       return forbidden("只有管理员或内容运营可以保存草稿");
     const id = String(data.id ?? "");
     const claim = await db
-      .prepare("SELECT owner_id,status FROM claims WHERE id=?")
+      .prepare("SELECT owner_id,status,creative_json FROM claims WHERE id=?")
       .bind(id)
-      .first<{ owner_id: string; status: string }>();
+      .first<{ owner_id: string; status: string; creative_json: string }>();
     if (!claim)
       return Response.json({ error: "内容任务不存在" }, { status: 404 });
     const tags = Array.isArray(data.tags)
@@ -764,14 +780,19 @@ export async function POST(request: Request) {
       : String(data.tags ?? "")
           .split(/[，,\s]+/)
           .filter(Boolean);
+    let creative = {} as Record<string, unknown>;
+    try { creative = JSON.parse(claim.creative_json || "{}"); } catch { creative = {}; }
+    if (data.video_options && typeof data.video_options === "object")
+      creative.video_options = data.video_options;
     await db
       .prepare(
-        "UPDATE claims SET title=?,body=?,tags=?,status=CASE WHEN status='revision' THEN 'writing' ELSE status END,updated_at=? WHERE id=?",
+        "UPDATE claims SET title=?,body=?,tags=?,creative_json=?,status=CASE WHEN status='revision' THEN 'writing' ELSE status END,updated_at=? WHERE id=?",
       )
       .bind(
         String(data.title ?? "").trim(),
         String(data.body ?? "").trim(),
         JSON.stringify(tags),
+        JSON.stringify(creative),
         now,
         id,
       )
@@ -876,6 +897,12 @@ export async function POST(request: Request) {
         { error: "请先上传至少一张最终图片，再提交图文审核" },
         { status: 400 },
       );
+    if (["douyin_video", "wechat_channels_video"].includes(claim.content_type)) {
+      const video = await db.prepare("SELECT id FROM media_assets WHERE claim_id=? AND kind='video' ORDER BY created_at DESC LIMIT 1")
+        .bind(id).first();
+      if (!video)
+        return Response.json({ error: "请先上传成品视频，再提交审核" }, { status: 400 });
+    }
     await db
       .prepare(
         "UPDATE claims SET status='review',review_comment='',updated_at=? WHERE id=? AND status IN ('writing','revision')",
@@ -907,6 +934,15 @@ export async function POST(request: Request) {
     const reviewImages = JSON.parse(
       String(claim.publish_images || "[]"),
     ) as string[];
+    const media = await db.prepare(
+      "SELECT id,kind,source,path,original_name,mime_type,sha256,size,width,height,duration,created_at FROM media_assets WHERE claim_id=? ORDER BY created_at",
+    ).bind(id).all<Record<string, unknown>>();
+    if (
+      result === "approved" &&
+      ["douyin_video", "wechat_channels_video"].includes(String(claim.content_type)) &&
+      !media.results.some((asset) => asset.kind === "video")
+    )
+      return Response.json({ error: "缺少成品视频，不能通过审核" }, { status: 400 });
     if (
       result === "approved" &&
       requiresReviewImages(claim.content_type) &&
@@ -924,6 +960,7 @@ export async function POST(request: Request) {
             tags: JSON.parse(String(claim.tags)),
             creative: JSON.parse(String(claim.creative_json || "{}")),
             images: reviewImages,
+            media_assets: media.results,
             content_type: claim.content_type,
             version: claim.version_number,
             approved_at: now,

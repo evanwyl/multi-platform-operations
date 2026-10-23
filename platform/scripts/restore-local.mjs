@@ -97,6 +97,7 @@ try {
     ["platform-accounts", join(dataRoot, "runtime/platform-accounts")],
     ["config", join(dataRoot, "runtime/config")],
     ["publish-assets", join(dataRoot, "runtime/publish-assets")],
+    ["media-assets", join(dataRoot, "runtime/media-assets")],
   ].filter(
     ([name]) =>
       manifest.contents.includes(name) && existsSync(join(staging, name)),

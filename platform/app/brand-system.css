@@ -507,6 +507,26 @@ a:focus-visible {
   align-self: flex-start;
 }
 
+.media-asset-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 12px;
+  border: 1px solid #d7e1f2;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.media-cover-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.review-video-summary {
+  margin: 12px 0;
+}
+
 .review-image-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));

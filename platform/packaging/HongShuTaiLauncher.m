@@ -603,7 +603,7 @@
   panel.canChooseDirectories = parameters.allowsDirectories;
   panel.allowsMultipleSelection = parameters.allowsMultipleSelection;
   panel.resolvesAliases = YES;
-  panel.allowedFileTypes = @[ @"jpg", @"jpeg", @"png", @"webp" ];
+  panel.allowedFileTypes = @[ @"jpg", @"jpeg", @"png", @"webp", @"mp4", @"mov", @"srt" ];
   [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
     completionHandler(result == NSModalResponseOK ? panel.URLs : nil);
   }];

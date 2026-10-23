@@ -8,7 +8,7 @@
 - [ ] `npm ci` 成功，未绕过 lockfile
 - [ ] `npm run prepare:runtime` 成功，MCP 二进制 SHA-256 与声明一致
 - [ ] `npm run verify` 全部通过
-- [ ] 安装包不包含 `.env`、`.wrangler`、`runtime/accounts`、`runtime/config`、`runtime/publish-assets`、`backups` 或真实日志
+- [ ] 安装包不包含 `.env`、`.wrangler`、`runtime/accounts`、`runtime/config`、`runtime/publish-assets`、`runtime/media-assets`、`backups` 或真实日志
 - [ ] 安装包包含 `THIRD_PARTY_NOTICES.md` 和第三方完整许可证
 
 ## 2. 未签名 macOS 安装包

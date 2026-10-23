@@ -60,6 +60,7 @@ function assertNoCustomerData(root) {
     "resources/app/runtime/config",
     "resources/app/runtime/generated",
     "resources/app/runtime/publish-assets",
+    "resources/app/runtime/media-assets",
     "resources/app/runtime/trend-covers",
     "resources/app/runtime-cache",
   ]) {

@@ -149,8 +149,14 @@ test("distinguishes a WeChat draft from a real publication", async () => {
   const app = await source("app/api/app/route.ts");
   const publish = await source("app/api/publish/route.ts");
   assert.match(app, /drafted: "已入公众号草稿箱"/);
-  assert.match(publish, /const completedStatus = isWechatArticle \? "drafted" : "published"/);
-  assert.match(publish, /const recordedPublishedAt = isWechatArticle \? null : publishedAt/);
+  assert.match(
+    publish,
+    /isWechatArticle \? "drafted" : "published"/,
+  );
+  assert.match(
+    publish,
+    /\["drafted", "scheduled"\]\.includes\(completedStatus\) \? null : publishedAt/,
+  );
 });
 
 test("hardens article fetching and login throttling against untrusted network input", async () => {
@@ -396,6 +402,7 @@ test("packages a self-contained unsigned macOS app without customer data", async
     "runtime/accounts",
     "runtime/platform-accounts",
     "runtime/publish-assets",
+    "runtime/media-assets",
   ]) {
     assert.match(packager, new RegExp(forbidden.replace("/", "\\/")));
   }
@@ -478,6 +485,7 @@ test("packages a self-contained Windows x64 app without customer data", async ()
     "runtime/accounts",
     "runtime/platform-accounts",
     "runtime/publish-assets",
+    "runtime/media-assets",
   ]) {
     assert.match(packager, new RegExp(forbidden.replace("/", "\\/")));
   }

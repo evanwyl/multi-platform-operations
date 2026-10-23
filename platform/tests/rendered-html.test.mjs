@@ -670,20 +670,28 @@ test("shows complete content task labels and separates review from real publishi
   assert.match(source, />\s*工作台\s*<\/button>/);
   assert.doesNotMatch(source, /goPlatformView\("dashboard"/);
   assert.match(source, />\s*爆款搜索\s*<\/button>/);
-  assert.match(source, />\s*选题中心\s*<\/button>/);
+  assert.match(source, /videoPlatform \? "视频任务" : "选题中心"/);
   assert.doesNotMatch(source, /platform-source-note/);
   assert.match(source, /知乎专栏选题库/);
   assert.match(source, /小红书图文选题库/);
   assert.match(source, /platform=\{scopePlatform \|\| "xiaohongshu"\}/);
   assert.doesNotMatch(source, /newTopicPlatform/);
-  assert.match(source, />\s*我的内容\s*<\/button>/);
+  assert.match(source, /videoPlatform \? "视频内容" : "我的内容"/);
   assert.match(source, /审核中心/);
   assert.match(source, /发布列表/);
   assert.match(
     source,
     />\s*账号管理\s*\{accounts\.length[\s\S]{0,100}<b>\{accounts\.length\}<\/b>[\s\S]{0,60}<\/button>/,
   );
-  assert.match(source, /\["xiaohongshu", "zhihu", "wechat"\]/);
+  for (const platform of [
+    "xiaohongshu",
+    "zhihu",
+    "wechat",
+    "douyin",
+    "wechat_channels",
+  ]) {
+    assert.match(source, new RegExp(`"${platform}"`));
+  }
   assert.match(source, /fixed-platform-field/);
   assert.doesNotMatch(source, /<select name="platform">/);
   assert.match(source, /微信公众号/);

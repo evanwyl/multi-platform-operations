@@ -93,6 +93,7 @@ function assertNoCustomerData(root) {
     "Contents/Resources/app/runtime/config",
     "Contents/Resources/app/runtime/generated",
     "Contents/Resources/app/runtime/publish-assets",
+    "Contents/Resources/app/runtime/media-assets",
     "Contents/Resources/app/runtime/trend-covers",
     "Contents/Resources/app/runtime-cache",
   ];

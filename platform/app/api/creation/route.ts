@@ -18,6 +18,7 @@ type CreativeDraft = {
   tags: string[];
   image_prompts: ImagePrompt[];
   creative_note: string;
+  video_options?: { mode: "publish" | "draft" };
 };
 
 type ClaimContext = {
@@ -114,6 +115,8 @@ function normalizeCreative(
     contentType === "zhihu_article" ||
     contentType === "zhihu_answer" ||
     contentType === "wechat_article";
+  const videoContent =
+    contentType === "douyin_video" || contentType === "wechat_channels_video";
   const directPrompts = (
     Array.isArray(draft.image_prompts) ? draft.image_prompts : []
   )
@@ -122,14 +125,14 @@ function normalizeCreative(
     .filter((item) => item.prompt);
   return {
     title_options: textList(draft.title_options, 6).map((item) =>
-      item.slice(0, longArticle ? 100 : 20),
+      item.slice(0, longArticle ? 100 : videoContent ? 55 : 20),
     ),
     title: String(draft.title ?? "")
       .trim()
-      .slice(0, longArticle ? 100 : 20),
+      .slice(0, longArticle ? 100 : videoContent ? 55 : 20),
     body: String(draft.body ?? "")
       .trim()
-      .slice(0, longArticle ? 20000 : 1200),
+      .slice(0, longArticle ? 20000 : videoContent ? 4000 : 1200),
     tags: textList(draft.tags, 10).map((item) =>
       item.slice(0, longArticle ? 32 : 16),
     ),
@@ -137,6 +140,17 @@ function normalizeCreative(
     creative_note: String(draft.creative_note ?? "")
       .trim()
       .slice(0, 300),
+    ...(videoContent
+      ? {
+          video_options: {
+            mode:
+              (draft.video_options as { mode?: string } | undefined)?.mode ===
+              "draft"
+                ? ("draft" as const)
+                : ("publish" as const),
+          },
+        }
+      : {}),
   };
 }
 

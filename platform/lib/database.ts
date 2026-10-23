@@ -84,6 +84,14 @@ const schemaStatements = [
     result_detail TEXT NOT NULL DEFAULT '', started_at TEXT NOT NULL, completed_at TEXT,
     FOREIGN KEY(job_id) REFERENCES publish_jobs(id)
   )`,
+  `CREATE TABLE IF NOT EXISTS media_assets (
+    id TEXT PRIMARY KEY, claim_id TEXT NOT NULL, owner_id TEXT NOT NULL,
+    kind TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'uploaded', path TEXT NOT NULL,
+    original_name TEXT NOT NULL DEFAULT '', mime_type TEXT NOT NULL DEFAULT '',
+    sha256 TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0,
+    width INTEGER, height INTEGER, duration REAL, created_at TEXT NOT NULL,
+    FOREIGN KEY(claim_id) REFERENCES claims(id), FOREIGN KEY(owner_id) REFERENCES users(id)
+  )`,
   `CREATE TABLE IF NOT EXISTS audit_logs (
     id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, action TEXT NOT NULL,
     object_type TEXT NOT NULL, object_id TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
@@ -154,6 +162,7 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_user_account_access_account ON user_account_access(account_id,user_id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_versions_claim_number ON claim_versions(claim_id, version_number)`,
   `CREATE INDEX IF NOT EXISTS idx_publish_jobs_claim_status ON publish_jobs(claim_id, status, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_media_assets_claim_kind ON media_assets(claim_id, kind, created_at)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_publish_attempts_job_number ON publish_attempts(job_id, attempt_number)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_trend_samples_status_seen ON trend_samples(status, last_seen_at)`,
