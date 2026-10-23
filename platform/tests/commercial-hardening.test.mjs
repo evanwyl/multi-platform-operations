@@ -419,8 +419,10 @@ test("packages a self-contained unsigned macOS app without customer data", async
   assert.match(launcher, /NSApplicationActivationPolicyRegular/);
   assert.match(
     launcher,
-    /loadRequest:\[NSURLRequest requestWithURL:platformURL\]/,
+    /NSURLRequestReloadIgnoringLocalCacheData/,
   );
+  assert.match(launcher, /WKWebsiteDataTypeDiskCache/);
+  assert.match(launcher, /WKWebsiteDataTypeMemoryCache/);
   assert.match(launcher, /applicationShouldHandleReopen/);
   assert.match(launcher, /局域网团队设置/);
   assert.match(launcher, /configureTeamMode:\) keyEquivalent:@","/);
