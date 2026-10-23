@@ -408,6 +408,8 @@ test("packages a self-contained unsigned macOS app without customer data", async
   }
   assert.match(packager, /codesign.*--verify.*--deep.*--strict/s);
   assert.match(service, /verbatimSymlinks: true/);
+  assert.match(service, /dist\/server\/BUILD_ID/);
+  assert.match(service, /cachedIdentity !== cacheIdentity/);
   assert.match(packager, /runtime\/node/);
   assert.match(packager, /macOS-arm64-unsigned\.dmg/);
   assert.match(packager, /多平台内容运营\.app/);

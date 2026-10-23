@@ -6,10 +6,15 @@ import { resolve } from "node:path";
 const appRoot = resolve(process.env.HONGSHUTAI_APP_ROOT || resolve(import.meta.dirname, ".."));
 const dataRoot = resolve(process.env.HONGSHUTAI_DATA_ROOT || appRoot);
 const version = JSON.parse(readFileSync(resolve(appRoot, "package.json"), "utf8")).version;
+const buildId = readFileSync(resolve(appRoot, "dist/server/BUILD_ID"), "utf8").trim();
+const cacheIdentity = `${version}:${buildId}`;
 const cacheParent = resolve(dataRoot, "runtime-cache");
 const workerRoot = resolve(cacheParent, version);
 const cacheMarker = resolve(workerRoot, ".ready");
-if (!existsSync(cacheMarker)) {
+const cachedIdentity = existsSync(cacheMarker)
+  ? readFileSync(cacheMarker, "utf8").trim()
+  : "";
+if (cachedIdentity !== cacheIdentity) {
   const staging = resolve(cacheParent, `.${version}.staging-${process.pid}`);
   mkdirSync(cacheParent, { recursive: true, mode: 0o700 });
   if (existsSync(staging)) rmSync(staging, { recursive: true, force: true });
@@ -17,7 +22,7 @@ if (!existsSync(cacheMarker)) {
   try {
     cpSync(resolve(appRoot, "dist"), resolve(staging, "dist"), { recursive: true });
     cpSync(resolve(appRoot, "node_modules"), resolve(staging, "node_modules"), { recursive: true, verbatimSymlinks: true });
-    writeFileSync(resolve(staging, ".ready"), `${version}\n`, { mode: 0o600 });
+    writeFileSync(resolve(staging, ".ready"), `${cacheIdentity}\n`, { mode: 0o600 });
     if (existsSync(workerRoot)) rmSync(workerRoot, { recursive: true, force: true });
     renameSync(staging, workerRoot);
   } catch (error) {
