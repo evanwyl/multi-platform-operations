@@ -84,6 +84,14 @@ const schemaStatements = [
     result_detail TEXT NOT NULL DEFAULT '', started_at TEXT NOT NULL, completed_at TEXT,
     FOREIGN KEY(job_id) REFERENCES publish_jobs(id)
   )`,
+  `CREATE TABLE IF NOT EXISTS media_assets (
+    id TEXT PRIMARY KEY, claim_id TEXT NOT NULL, owner_id TEXT NOT NULL,
+    kind TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'uploaded', path TEXT NOT NULL,
+    original_name TEXT NOT NULL DEFAULT '', mime_type TEXT NOT NULL DEFAULT '',
+    sha256 TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0,
+    width INTEGER, height INTEGER, duration REAL, created_at TEXT NOT NULL,
+    FOREIGN KEY(claim_id) REFERENCES claims(id), FOREIGN KEY(owner_id) REFERENCES users(id)
+  )`,
   `CREATE TABLE IF NOT EXISTS audit_logs (
     id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, action TEXT NOT NULL,
     object_type TEXT NOT NULL, object_id TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
@@ -154,6 +162,7 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_user_account_access_account ON user_account_access(account_id,user_id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_versions_claim_number ON claim_versions(claim_id, version_number)`,
   `CREATE INDEX IF NOT EXISTS idx_publish_jobs_claim_status ON publish_jobs(claim_id, status, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_media_assets_claim_kind ON media_assets(claim_id, kind, created_at)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_publish_attempts_job_number ON publish_attempts(job_id, attempt_number)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_trend_samples_status_seen ON trend_samples(status, last_seen_at)`,
@@ -167,14 +176,22 @@ let databaseInitialization: Promise<void> | null = null;
 async function initializeDatabase() {
   const db = database();
   const accessTableExisted = Boolean(
-    await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_account_access'").first(),
+    await db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='user_account_access'",
+      )
+      .first(),
   );
   for (const statement of schemaStatements) await db.prepare(statement).run();
   if (!accessTableExisted)
-    await db.prepare(`INSERT OR IGNORE INTO user_account_access (user_id,account_id,created_at)
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO user_account_access (user_id,account_id,created_at)
       SELECT u.id,a.id,? FROM users u CROSS JOIN accounts a
-      WHERE u.status='active' AND u.roles NOT LIKE '%"admin"%' AND a.is_demo=0`)
-      .bind(new Date().toISOString()).run();
+      WHERE u.status='active' AND u.roles NOT LIKE '%"admin"%' AND a.is_demo=0`,
+      )
+      .bind(new Date().toISOString())
+      .run();
   const portColumn = await db
     .prepare(
       "SELECT name FROM pragma_table_info('accounts') WHERE name='mcp_port'",
@@ -463,7 +480,7 @@ async function initializeDatabase() {
     .run();
   await db
     .prepare(
-      "UPDATE accounts SET status='login_expired' WHERE is_demo=0 AND xhs_user_id IS NULL AND status='online'",
+      "UPDATE accounts SET status='login_expired' WHERE platform='xiaohongshu' AND is_demo=0 AND xhs_user_id IS NULL AND status='online'",
     )
     .run();
   await db.prepare("DROP INDEX IF EXISTS idx_accounts_mcp_port_real").run();
@@ -482,7 +499,7 @@ async function initializeDatabase() {
       `UPDATE claims SET status='archived',updated_at=? WHERE id IN (
     SELECT id FROM (
       SELECT id,ROW_NUMBER() OVER (
-        PARTITION BY topic_id,account_id ORDER BY updated_at DESC,created_at ASC,id ASC
+        PARTITION BY topic_id,account_id,content_type ORDER BY updated_at DESC,created_at ASC,id ASC
       ) AS duplicate_rank
       FROM claims WHERE status NOT IN ('published','drafted','archived')
     ) WHERE duplicate_rank>1
@@ -490,11 +507,13 @@ async function initializeDatabase() {
     )
     .bind(new Date().toISOString())
     .run();
-  await db.prepare("DROP INDEX IF EXISTS idx_claims_active_topic_account").run();
+  await db
+    .prepare("DROP INDEX IF EXISTS idx_claims_active_topic_account")
+    .run();
   await db
     .prepare(
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_active_topic_account
-    ON claims(topic_id,account_id) WHERE status NOT IN ('published','drafted','archived')`,
+    ON claims(topic_id,account_id,content_type) WHERE status NOT IN ('published','drafted','archived')`,
     )
     .run();
   await db

@@ -14,6 +14,7 @@
 @property(nonatomic, strong) NSURL *dataRoot;
 @property(nonatomic, strong) NSURL *configurationURL;
 @property(nonatomic, strong) NSURL *platformURL;
+@property(nonatomic, assign) BOOL webCachePrepared;
 @property(nonatomic, copy) NSString *teamMode;
 @property(nonatomic, copy) NSString *teamToken;
 @property(nonatomic, strong) NSWindow *window;
@@ -425,7 +426,25 @@
     NSString *currentHost = self.webView.URL.host.lowercaseString;
     BOOL showingPlatform = [currentHost isEqualToString:platformURL.host.lowercaseString];
     if (!showingPlatform) {
-      [self.webView loadRequest:[NSURLRequest requestWithURL:platformURL]];
+      void (^loadFresh)(void) = ^{
+        NSURLRequest *request = [NSURLRequest requestWithURL:platformURL
+                                                 cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                             timeoutInterval:30];
+        [self.webView loadRequest:request];
+      };
+      if (!self.webCachePrepared) {
+        self.webCachePrepared = YES;
+        NSSet<NSString *> *cacheTypes = [NSSet setWithObjects:
+          WKWebsiteDataTypeDiskCache,
+          WKWebsiteDataTypeMemoryCache,
+          nil];
+        [self.webView.configuration.websiteDataStore
+          removeDataOfTypes:cacheTypes
+          modifiedSince:[NSDate distantPast]
+          completionHandler:loadFresh];
+      } else {
+        loadFresh();
+      }
     }
   }
   [self.window makeKeyAndOrderFront:nil];
@@ -603,7 +622,7 @@
   panel.canChooseDirectories = parameters.allowsDirectories;
   panel.allowsMultipleSelection = parameters.allowsMultipleSelection;
   panel.resolvesAliases = YES;
-  panel.allowedFileTypes = @[ @"jpg", @"jpeg", @"png", @"webp" ];
+  panel.allowedFileTypes = @[ @"jpg", @"jpeg", @"png", @"webp", @"mp4", @"mov", @"srt" ];
   [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
     completionHandler(result == NSModalResponseOK ? panel.URLs : nil);
   }];

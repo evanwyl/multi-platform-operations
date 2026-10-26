@@ -2,16 +2,19 @@ import { spawn } from "node:child_process";
 import {
   chmodSync,
   closeSync,
+  createWriteStream,
   existsSync,
   mkdirSync,
   openSync,
   readFileSync,
   readdirSync,
   renameSync,
+  statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -25,6 +28,12 @@ import {
   publishZhihuArticleBrowser,
   zhihuBrowserAuthStatus,
 } from "./platforms/zhihu-browser.mjs";
+import {
+  closeSocialBrowsers,
+  openSocialBrowserLogin,
+  publishSocialVideo,
+  socialBrowserAuthStatus,
+} from "./platforms/social-video-browser.mjs";
 import {
   publishWechatDraft,
   saveWechatCredentials,
@@ -50,6 +59,7 @@ const root = resolve(dataRoot, "runtime/accounts");
 const platformAccountRoot = resolve(dataRoot, "runtime/platform-accounts");
 const analysisRoot = resolve(dataRoot, "runtime/analysis");
 const publishAssetRoot = resolve(dataRoot, "runtime/publish-assets");
+const mediaAssetRoot = resolve(dataRoot, "runtime/media-assets");
 const trendCoverRoot = resolve(dataRoot, "runtime/trend-covers");
 const configRoot = resolve(dataRoot, "runtime/config");
 const aiConfigPath = join(configRoot, "ai.json");
@@ -68,6 +78,7 @@ const binary =
 const promptFiles = {
   research: resolve(appRoot, "runtime/prompts/research-system.md"),
   content: resolve(appRoot, "runtime/prompts/content-system.md"),
+  douyinImageContent: resolve(appRoot, "runtime/prompts/douyin-image-system.md"),
   humanizer: resolve(appRoot, "runtime/prompts/humanizer-system.md"),
   zhihuContent: resolve(appRoot, "runtime/prompts/zhihu-content-system.md"),
   wechatContent: resolve(appRoot, "runtime/prompts/wechat-content-system.md"),
@@ -77,6 +88,7 @@ const analysisSchemas = {
   "candidate-screen": resolve(appRoot, "runtime/candidate-screen.schema.json"),
   "topic-analysis": resolve(appRoot, "runtime/topic-analysis.schema.json"),
   "content-draft": resolve(appRoot, "runtime/content-draft.schema.json"),
+  "douyin-image-draft": resolve(appRoot, "runtime/content-draft.schema.json"),
   "zhihu-article-draft": resolve(
     appRoot,
     "runtime/zhihu-article-draft.schema.json",
@@ -103,6 +115,7 @@ mkdirSync(root, { recursive: true });
 mkdirSync(platformAccountRoot, { recursive: true });
 mkdirSync(analysisRoot, { recursive: true });
 mkdirSync(publishAssetRoot, { recursive: true });
+mkdirSync(mediaAssetRoot, { recursive: true });
 mkdirSync(trendCoverRoot, { recursive: true });
 mkdirSync(configRoot, { recursive: true });
 for (const directory of [
@@ -110,6 +123,7 @@ for (const directory of [
   platformAccountRoot,
   analysisRoot,
   publishAssetRoot,
+  mediaAssetRoot,
   trendCoverRoot,
   configRoot,
 ])
@@ -281,6 +295,17 @@ function systemPrompt(kind) {
     }
     return `${readFileSync(promptFiles.zhihuContent, "utf8")}\n\n<EMBEDDED_HUMANIZER_SKILL>\n${readFileSync(promptFiles.humanizer, "utf8")}\n</EMBEDDED_HUMANIZER_SKILL>`;
   }
+  if (kind === "douyin-image-draft") {
+    if (
+      !existsSync(promptFiles.douyinImageContent) ||
+      !existsSync(promptFiles.humanizer)
+    ) {
+      throw Object.assign(new Error("平台内置抖音图文编辑或 Humanizer 规则缺失"), {
+        status: 503,
+      });
+    }
+    return `${readFileSync(promptFiles.douyinImageContent, "utf8")}\n\n<EMBEDDED_HUMANIZER_SKILL>\n${readFileSync(promptFiles.humanizer, "utf8")}\n</EMBEDDED_HUMANIZER_SKILL>`;
+  }
   if (kind !== "content-draft") {
     if (!existsSync(promptFiles.research))
       throw Object.assign(new Error("平台内置 AI 规则缺失"), { status: 503 });
@@ -422,6 +447,60 @@ async function body(request) {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+}
+
+async function saveMediaAsset(request) {
+  const claimId = String(request.headers["x-claim-id"] || "");
+  const kind = String(request.headers["x-media-kind"] || "");
+  const mimeType = String(request.headers["content-type"] || "").split(";")[0].toLowerCase();
+  const originalName = decodeURIComponent(String(request.headers["x-file-name"] || "media"));
+  if (!validAccountId(claimId))
+    throw Object.assign(new Error("内容任务标识不合法"), { status: 400 });
+  if (!["video", "cover_landscape", "cover_portrait", "subtitle"].includes(kind))
+    throw Object.assign(new Error("媒体类型不合法"), { status: 400 });
+  const extensions = {
+    "video/mp4": "mp4",
+    "video/quicktime": "mov",
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "application/x-subrip": "srt",
+    "text/plain": "srt",
+  };
+  const extension = extensions[mimeType];
+  if (!extension || (kind === "video" ? !mimeType.startsWith("video/") : kind.startsWith("cover") ? !mimeType.startsWith("image/") : extension !== "srt"))
+    throw Object.assign(new Error(kind === "video" ? "视频只支持 MP4 或 MOV" : kind.startsWith("cover") ? "封面只支持 JPG、PNG 或 WebP" : "字幕只支持 SRT"), { status: 400 });
+  const limit = kind === "video" ? 8 * 1024 * 1024 * 1024 : 20 * 1024 * 1024;
+  const directory = resolve(mediaAssetRoot, claimId);
+  mkdirSync(directory, { recursive: true });
+  chmodSync(directory, 0o700);
+  const stem = `${Date.now()}-${kind}`;
+  const temporary = resolve(directory, `${stem}.uploading`);
+  const finalPath = resolve(directory, `${stem}.${extension}`);
+  const hash = createHash("sha256");
+  const output = createWriteStream(temporary, { mode: 0o600 });
+  let size = 0;
+  try {
+    for await (const chunk of request) {
+      const buffer = Buffer.from(chunk);
+      size += buffer.length;
+      if (size > limit) throw Object.assign(new Error("媒体文件超过大小限制"), { status: 413 });
+      hash.update(buffer);
+      if (!output.write(buffer)) await new Promise((resolveDrain) => output.once("drain", resolveDrain));
+    }
+    await new Promise((resolveFinish, rejectFinish) => {
+      output.once("error", rejectFinish);
+      output.end(resolveFinish);
+    });
+    if (!size) throw Object.assign(new Error("媒体文件为空"), { status: 400 });
+    renameSync(temporary, finalPath);
+    chmodSync(finalPath, 0o600);
+    return { path: finalPath, size: statSync(finalPath).size, sha256: hash.digest("hex"), kind, mimeType, originalName: originalName.slice(0, 240) };
+  } catch (error) {
+    output.destroy();
+    if (existsSync(temporary)) unlinkSync(temporary);
+    throw error;
+  }
 }
 
 function completionText(payload) {
@@ -905,6 +984,9 @@ const server = createServer(async (request, response) => {
         ),
       });
     }
+    if (request.method === "POST" && url.pathname === "/media-assets") {
+      return json(response, 200, await saveMediaAsset(request));
+    }
     if (request.method === "GET" && url.pathname === "/slots") {
       return json(response, 200, {
         pending: acquireQueue.length,
@@ -919,6 +1001,23 @@ const server = createServer(async (request, response) => {
           lastUsed: slot.lastUsed,
         })),
       });
+    }
+    if (request.method === "GET" && url.pathname === "/social/auth-status") {
+      const platform = url.searchParams.get("platform") || "";
+      const accountId = url.searchParams.get("accountId") || "";
+      return json(response, 200, await socialBrowserAuthStatus(platformAccountRoot, appRoot, platform, accountId));
+    }
+    if (request.method === "POST" && url.pathname === "/social/browser-login") {
+      const payload = await body(request);
+      return json(response, 200, await openSocialBrowserLogin(platformAccountRoot, appRoot, payload.platform, payload.accountId));
+    }
+    if (request.method === "POST" && url.pathname === "/social/browser-login-complete") {
+      const payload = await body(request);
+      return json(response, 200, await socialBrowserAuthStatus(platformAccountRoot, appRoot, payload.platform, payload.accountId, true));
+    }
+    if (request.method === "POST" && url.pathname === "/social/publish") {
+      const payload = await body(request);
+      return json(response, 200, await publishSocialVideo(platformAccountRoot, appRoot, payload.platform, payload));
     }
     if (request.method === "GET" && url.pathname === "/zhihu/auth-status") {
       const accountId = url.searchParams.get("accountId") || "";
@@ -1225,6 +1324,7 @@ sweep.unref();
 function shutdown() {
   cancelAnalysis();
   void closeZhihuBrowsers();
+  void closeSocialBrowsers();
   for (const slot of slots) stop(slot, "平台关闭");
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3500).unref();

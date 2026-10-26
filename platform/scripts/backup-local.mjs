@@ -53,6 +53,7 @@ const sources = [
   ["platform-accounts", join(dataRoot, "runtime/platform-accounts")],
   ["config", join(dataRoot, "runtime/config")],
   ["publish-assets", join(dataRoot, "runtime/publish-assets")],
+  ["media-assets", join(dataRoot, "runtime/media-assets")],
 ].filter(([, source]) => existsSync(source));
 
 if (!sources.some(([name]) => name === "database"))

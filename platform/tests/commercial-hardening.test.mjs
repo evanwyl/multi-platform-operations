@@ -106,17 +106,17 @@ test("records publish jobs, attempts, and uncertain delivery outcomes", async ()
   );
 });
 
-test("enforces one active claim per topic and account at the database boundary", async () => {
+test("enforces one active claim per topic, account, and content format", async () => {
   const database = await source("lib/database.ts");
   const app = await source("app/api/app/route.ts");
   assert.match(
     database,
-    /ROW_NUMBER\(\) OVER \(\s*PARTITION BY topic_id,account_id/s,
+    /ROW_NUMBER\(\) OVER \(\s*PARTITION BY topic_id,account_id,content_type/s,
   );
   assert.match(database, /WHERE duplicate_rank>1/);
   assert.match(
     database,
-    /CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_active_topic_account\s+ON claims\(topic_id,account_id\) WHERE status NOT IN \('published','drafted','archived'\)/s,
+    /CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_active_topic_account\s+ON claims\(topic_id,account_id,content_type\) WHERE status NOT IN \('published','drafted','archived'\)/s,
   );
   const claimBlock = app.slice(
     app.indexOf('action === "claim_topic"'),
@@ -149,8 +149,14 @@ test("distinguishes a WeChat draft from a real publication", async () => {
   const app = await source("app/api/app/route.ts");
   const publish = await source("app/api/publish/route.ts");
   assert.match(app, /drafted: "已入公众号草稿箱"/);
-  assert.match(publish, /const completedStatus = isWechatArticle \? "drafted" : "published"/);
-  assert.match(publish, /const recordedPublishedAt = isWechatArticle \? null : publishedAt/);
+  assert.match(
+    publish,
+    /isWechatArticle \? "drafted" : "published"/,
+  );
+  assert.match(
+    publish,
+    /\["drafted", "scheduled"\]\.includes\(completedStatus\) \? null : publishedAt/,
+  );
 });
 
 test("hardens article fetching and login throttling against untrusted network input", async () => {
@@ -396,11 +402,14 @@ test("packages a self-contained unsigned macOS app without customer data", async
     "runtime/accounts",
     "runtime/platform-accounts",
     "runtime/publish-assets",
+    "runtime/media-assets",
   ]) {
     assert.match(packager, new RegExp(forbidden.replace("/", "\\/")));
   }
   assert.match(packager, /codesign.*--verify.*--deep.*--strict/s);
   assert.match(service, /verbatimSymlinks: true/);
+  assert.match(service, /dist\/server\/BUILD_ID/);
+  assert.match(service, /cachedIdentity !== cacheIdentity/);
   assert.match(packager, /runtime\/node/);
   assert.match(packager, /macOS-arm64-unsigned\.dmg/);
   assert.match(packager, /多平台内容运营\.app/);
@@ -412,8 +421,10 @@ test("packages a self-contained unsigned macOS app without customer data", async
   assert.match(launcher, /NSApplicationActivationPolicyRegular/);
   assert.match(
     launcher,
-    /loadRequest:\[NSURLRequest requestWithURL:platformURL\]/,
+    /NSURLRequestReloadIgnoringLocalCacheData/,
   );
+  assert.match(launcher, /WKWebsiteDataTypeDiskCache/);
+  assert.match(launcher, /WKWebsiteDataTypeMemoryCache/);
   assert.match(launcher, /applicationShouldHandleReopen/);
   assert.match(launcher, /局域网团队设置/);
   assert.match(launcher, /configureTeamMode:\) keyEquivalent:@","/);
@@ -478,6 +489,7 @@ test("packages a self-contained Windows x64 app without customer data", async ()
     "runtime/accounts",
     "runtime/platform-accounts",
     "runtime/publish-assets",
+    "runtime/media-assets",
   ]) {
     assert.match(packager, new RegExp(forbidden.replace("/", "\\/")));
   }
