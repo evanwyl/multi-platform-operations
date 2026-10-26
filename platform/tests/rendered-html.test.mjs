@@ -153,7 +153,10 @@ test("runs the Humanizer skill after Xiaohongshu expert drafting", async () => {
     new URL("../runtime/prompts/humanizer-system.md", import.meta.url),
     "utf8",
   );
-  assert.match(creationRoute, /Humanizer 对标题、正文和创作说明做最终去 AI 味编辑/);
+  assert.match(
+    creationRoute,
+    /Humanizer 对标题、正文和创作说明做最终去 AI 味编辑/,
+  );
   assert.match(contentPrompt, /不得跳过第二遍去 AI 味检查/);
   assert.match(humanizerPrompt, /blader\/humanizer/);
   assert.match(humanizerPrompt, /版本 `2\.11\.2`/);
@@ -221,7 +224,10 @@ test("includes successfully fetched source notes as protected rewrite references
     "utf8",
   );
   assert.match(contentPrompt, /它是唯一内容主稿/);
-  assert.match(contentPrompt, /不得把辅助来源独有的观点、案例、数字或段落混入成稿/);
+  assert.match(
+    contentPrompt,
+    /不得把辅助来源独有的观点、案例、数字或段落混入成稿/,
+  );
   assert.match(humanizerPrompt, /不能把保真改写变成重新创作/);
 });
 
@@ -580,8 +586,13 @@ test("shares content visibility while limiting edits to content operators", asyn
     creationRoute,
     /return canView\(user, claim\) && can\(user, roleGroups\.operate\)/,
   );
-  const saveDraftBlock = appRoute.slice(appRoute.indexOf('action === "save_draft"'));
-  assert.doesNotMatch(saveDraftBlock.slice(0, 900), /claim\.owner_id !== user\.id/);
+  const saveDraftBlock = appRoute.slice(
+    appRoute.indexOf('action === "save_draft"'),
+  );
+  assert.doesNotMatch(
+    saveDraftBlock.slice(0, 900),
+    /claim\.owner_id !== user\.id/,
+  );
   assert.doesNotMatch(creationRoute, /claim\.owner_id === user\.id/);
 });
 
@@ -670,13 +681,16 @@ test("shows complete content task labels and separates review from real publishi
   assert.match(source, />\s*工作台\s*<\/button>/);
   assert.doesNotMatch(source, /goPlatformView\("dashboard"/);
   assert.match(source, />\s*爆款搜索\s*<\/button>/);
-  assert.match(source, /videoPlatform \? "视频任务" : "选题中心"/);
+  assert.match(
+    source,
+    /videoOnlyPlatform[\s\S]{0,120}"视频任务"[\s\S]{0,120}"内容选题"/,
+  );
   assert.doesNotMatch(source, /platform-source-note/);
   assert.match(source, /知乎专栏选题库/);
-  assert.match(source, /小红书图文选题库/);
+  assert.match(source, /小红书内容选题库/);
   assert.match(source, /platform=\{scopePlatform \|\| "xiaohongshu"\}/);
   assert.doesNotMatch(source, /newTopicPlatform/);
-  assert.match(source, /videoPlatform \? "视频内容" : "我的内容"/);
+  assert.match(source, /videoOnlyPlatform \? "视频内容" : "我的内容"/);
   assert.match(source, /审核中心/);
   assert.match(source, /发布列表/);
   assert.match(
@@ -709,11 +723,14 @@ test("shows complete content task labels and separates review from real publishi
   assert.match(source, /审核冻结图文/);
   assert.match(source, /publish_snapshot/);
   assert.match(source, /window\.confirm/);
-  assert.match(publishRoute, /callMcpTool\(\s*port,\s*"publish_content"/);
+  assert.match(
+    publishRoute,
+    /isXiaohongshuVideo \? "publish_video" : "publish_content"/,
+  );
   assert.match(publishRoute, /const PUBLISH_TIMEOUT_MS = 6 \* 60 \* 1000/);
   assert.match(
     publishRoute,
-    /"publish_content",\s*\{ title, content: body, images, tags: cleanTags \},\s*PUBLISH_TIMEOUT_MS/,
+    /\? \{ title, content: body, video: videoAsset\?\.path, tags: cleanTags \}[\s\S]{0,120}: \{ title, content: body, images, tags: cleanTags \}/,
   );
   assert.match(publishRoute, /content: body, images, tags: cleanTags/);
   assert.doesNotMatch(publishRoute, /tagText|`\$\{body\}\\n\\n\$\{tagText\}`/);
@@ -800,7 +817,25 @@ test("organizes my content by account, content list, and AI editor", async () =>
   assert.match(source, /进入账号 →/);
   assert.match(source, /← 返回账号/);
   assert.match(source, /← 返回内容列表/);
-  assert.match(source, /一句话生成可编辑的小红书图文稿/);
+  assert.match(source, /aria-label="选择内容创作类型"/);
+  assert.match(source, />\s*图文创作\s*</);
+  assert.match(source, />\s*视频创作\s*</);
+  assert.match(source, /accountClaims\.filter\(isImageClaim\)/);
+  assert.match(source, /accountClaims\.filter\(isVideoClaim\)/);
+  assert.match(
+    source,
+    /key=\{`\$\{scopePlatform \|\| "xiaohongshu"\}:\$\{contentAccountId\}:\$\{contentTargetId \|\| "content-default"\}`\}/,
+  );
+  assert.match(source, /if \(platform === "wechat_channels"\) return "video"/);
+  assert.match(source, /AI 视频制作/);
+  assert.match(source, /当前为成片上传、审核与发布流程/);
+  assert.match(source, /图文创作台/);
+  assert.match(source, /视频创作台/);
+  assert.match(source, /图片与顺序/);
+  assert.match(source, /成片与封面/);
+  assert.match(source, /creator-compose-grid/);
+  assert.match(source, /creator-media-workbench/);
+  assert.match(source, /一句话生成可编辑的\$\{selectedPlatformName\}图文稿/);
   assert.match(source, /整个帖子的图片提示词/);
   assert.doesNotMatch(source, /setSelectedAccountId\(accountClaims\[0\]/);
   assert.match(brand, /\.content-account-overview-grid/);
@@ -815,6 +850,27 @@ test("organizes my content by account, content list, and AI editor", async () =>
     /\.view-content \.content-editor-shell \.visual-builder\s*\{[\s\S]*?grid-column: auto;/,
   );
   assert.match(theme, /@media \(max-width: 900px\)/);
+  assert.match(
+    brand,
+    /\.creator-compose-grid\s*\{[^}]*grid-template-columns: minmax\(280px, 0\.88fr\) minmax\(360px, 1\.12fr\)/s,
+  );
+  assert.match(
+    brand,
+    /\.creator-media-workbench\s*\{[^}]*grid-area: media;[^}]*min-height: 420px;[^}]*align-self: stretch;/s,
+  );
+  assert.doesNotMatch(
+    brand,
+    /\.creator-media-workbench\s*\{[^}]*min-height: 100%;/s,
+  );
+  assert.match(source, /preserveEditorViewport/);
+  assert.match(
+    source,
+    /window\.scrollTo\(\{ \.\.\.viewport, behavior: "auto" \}\)/,
+  );
+  assert.match(
+    theme,
+    /\.view-content \.creative-shell\.content-editor-shell\.video-creator-shell\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\)/s,
+  );
 });
 
 test("uploads and reviews final images before publishing", async () => {

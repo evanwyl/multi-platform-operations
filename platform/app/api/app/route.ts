@@ -9,6 +9,8 @@ import { can, forbidden, roleGroups } from "../../../lib/permissions";
 import { managerFetch } from "../../../lib/runtime-client";
 import {
   contentTypeForPlatform,
+  isContentTypeForPlatform,
+  isVideoContentType,
   isPlatform,
   requiresReviewImages,
 } from "../../../lib/platforms";
@@ -708,20 +710,29 @@ export async function POST(request: Request) {
       return Response.json({ error: "发布账号不存在" }, { status: 404 });
     if (!(await canAccessAccount(db, user, account.id)))
       return forbidden("你没有该账号的操作权限");
+    if (!isPlatform(account.platform))
+      return Response.json({ error: "账号平台不受支持" }, { status: 400 });
     if (source?.platform && source.platform !== account.platform)
       return Response.json(
         { error: "选题平台与发布账号不一致，请选择同平台账号" },
         { status: 409 },
       );
+    const requestedContentType = String(data.content_type ?? "");
+    const contentType = requestedContentType || contentTypeForPlatform(account.platform);
+    if (!isContentTypeForPlatform(contentType, account.platform))
+      return Response.json(
+        { error: "所选内容形式不适用于这个平台" },
+        { status: 400 },
+      );
     const existing = await db
       .prepare(
-        "SELECT id FROM claims WHERE topic_id=? AND account_id=? AND status NOT IN ('published','drafted','archived')",
+        "SELECT id FROM claims WHERE topic_id=? AND account_id=? AND content_type=? AND status NOT IN ('published','drafted','archived')",
       )
-      .bind(topicId, accountId)
+      .bind(topicId, accountId, contentType)
       .first();
     if (existing)
       return Response.json(
-        { error: "该选题已被这个账号认领" },
+        { error: "该选题已被这个账号认领为相同内容形式" },
         { status: 409 },
       );
     const id = crypto.randomUUID();
@@ -737,9 +748,7 @@ export async function POST(request: Request) {
             accountId,
             user.id,
             String(data.angle ?? ""),
-            contentTypeForPlatform(
-              account.platform as "xiaohongshu" | "zhihu" | "wechat" | "douyin" | "wechat_channels",
-            ),
+            contentType,
             now,
             now,
           ),
@@ -750,9 +759,9 @@ export async function POST(request: Request) {
     } catch (error) {
       const competingClaim = await db
         .prepare(
-          "SELECT id FROM claims WHERE topic_id=? AND account_id=? AND status NOT IN ('published','drafted','archived')",
+          "SELECT id FROM claims WHERE topic_id=? AND account_id=? AND content_type=? AND status NOT IN ('published','drafted','archived')",
         )
-        .bind(topicId, accountId)
+        .bind(topicId, accountId, contentType)
         .first();
       if (competingClaim)
         return Response.json(
@@ -897,7 +906,7 @@ export async function POST(request: Request) {
         { error: "请先上传至少一张最终图片，再提交图文审核" },
         { status: 400 },
       );
-    if (["douyin_video", "wechat_channels_video"].includes(claim.content_type)) {
+    if (isVideoContentType(claim.content_type)) {
       const video = await db.prepare("SELECT id FROM media_assets WHERE claim_id=? AND kind='video' ORDER BY created_at DESC LIMIT 1")
         .bind(id).first();
       if (!video)
@@ -939,7 +948,7 @@ export async function POST(request: Request) {
     ).bind(id).all<Record<string, unknown>>();
     if (
       result === "approved" &&
-      ["douyin_video", "wechat_channels_video"].includes(String(claim.content_type)) &&
+      isVideoContentType(String(claim.content_type)) &&
       !media.results.some((asset) => asset.kind === "video")
     )
       return Response.json({ error: "缺少成品视频，不能通过审核" }, { status: 400 });

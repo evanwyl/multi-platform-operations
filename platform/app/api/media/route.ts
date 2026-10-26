@@ -3,6 +3,7 @@ import { audit, database, ensureDatabase } from "../../../lib/database";
 import { can, forbidden, roleGroups } from "../../../lib/permissions";
 import { canAccessAccount } from "../../../lib/account-access";
 import { managerFetch } from "../../../lib/runtime-client";
+import { isVideoContentType } from "../../../lib/platforms";
 
 const mediaKinds = new Set(["video", "cover_landscape", "cover_portrait", "subtitle"]);
 
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
   if (claim.owner_id !== user.id && !can(user, roleGroups.review)) return forbidden("只有内容负责人或审核员可以管理视频素材");
   if (!["writing", "revision"].includes(claim.status))
     return Response.json({ error: "只有创作中或待修改的内容可以更换素材" }, { status: 409 });
-  if (!["douyin_video", "wechat_channels_video"].includes(claim.content_type))
+  if (!isVideoContentType(claim.content_type))
     return Response.json({ error: "当前内容不是视频发布任务" }, { status: 400 });
   if (!request.body) return Response.json({ error: "没有收到媒体文件" }, { status: 400 });
   const uploadHeaders: Record<string, string> = {

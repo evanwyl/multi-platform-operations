@@ -84,7 +84,7 @@ test("公众号创作使用独立长文提示词和平台化界面", () => {
   assert.match(ui, /查看最终公众号排版/);
   assert.match(ui, /排版已在审核时冻结/);
   assert.match(ui, /未上传图片，不影响提交审核/);
-  assert.match(ui, /isXiaohongshuClaim\(selected\)/);
+  assert.match(ui, /imageContent[\s\S]{0,80}!selected\.publish_images\?\.length/);
   assert.doesNotMatch(creation, /公众号文章配图建议不完整/);
   assert.match(prompt, /image_prompts 可以返回空数组/);
   assert.match(ui, /官方草稿接口必须有一张封面/);

@@ -93,9 +93,12 @@ export async function POST(request: Request) {
   const isWechatArticle =
     claim.account_platform === "wechat" &&
     claim.content_type === "wechat_article";
-  const isSocialVideo =
-    (claim.account_platform === "douyin" && claim.content_type === "douyin_video") ||
+  const isBrowserPublish =
+    (claim.account_platform === "douyin" && ["douyin_image", "douyin_video"].includes(claim.content_type)) ||
     (claim.account_platform === "wechat_channels" && claim.content_type === "wechat_channels_video");
+  const isVideoContent = ["xiaohongshu_video", "douyin_video", "wechat_channels_video"].includes(claim.content_type);
+  const isXiaohongshuVideo =
+    claim.account_platform === "xiaohongshu" && claim.content_type === "xiaohongshu_video";
   const themes = new Set([
     "default",
     "grace",
@@ -334,12 +337,12 @@ export async function POST(request: Request) {
     const isZhihuArticle =
       claim.account_platform === "zhihu" &&
       claim.content_type === "zhihu_article";
-    if (!isZhihuArticle && !isWechatArticle && !isSocialVideo && !claim.xhs_user_id)
+    if (!isZhihuArticle && !isWechatArticle && !isBrowserPublish && !claim.xhs_user_id)
       return Response.json(
         { error: `${claim.account_name} 尚未完成登录和身份绑定` },
         { status: 409 },
       );
-    if (!isZhihuArticle && !isWechatArticle && !isSocialVideo && !images.length)
+    if (["xiaohongshu_note", "douyin_image"].includes(claim.content_type) && !images.length)
       return Response.json(
         {
           error: isWechatArticle
@@ -358,14 +361,14 @@ export async function POST(request: Request) {
         { error: `${claim.account_name} 尚未配置公众号开发者接口` },
         { status: 409 },
       );
-    if (isSocialVideo && (claim.auth_method !== "browser" || !claim.external_user_id))
+    if (isBrowserPublish && (claim.auth_method !== "browser" || !claim.external_user_id))
       return Response.json(
         { error: `${claim.account_name} 尚未完成浏览器登录和身份绑定` },
         { status: 409 },
       );
     const mediaAssets = Array.isArray(frozen?.media_assets) ? frozen.media_assets : [];
     const videoAsset = mediaAssets.find((asset) => asset.kind === "video" && asset.path);
-    if (isSocialVideo && !videoAsset?.path)
+    if (isVideoContent && !videoAsset?.path)
       return Response.json(
         { error: "审核快照缺少成品视频，请退回修改后重新审核" },
         { status: 409 },
@@ -428,22 +431,24 @@ export async function POST(request: Request) {
     let acquired = false;
     let publishDispatched = false;
     try {
-      if (isZhihuArticle || isWechatArticle || isSocialVideo) {
+      if (isZhihuArticle || isWechatArticle || isBrowserPublish) {
         publishDispatched = true;
         const response = await managerFetch(
-          isSocialVideo ? "/social/publish" : isWechatArticle ? "/wechat/publish" : "/zhihu/publish",
+          isBrowserPublish ? "/social/publish" : isWechatArticle ? "/wechat/publish" : "/zhihu/publish",
           {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(
-              isSocialVideo
+              isBrowserPublish
                 ? {
                     platform: claim.account_platform,
+                    contentType: claim.content_type,
                     accountId: claim.account_id,
                     expectedIdentityKey: claim.external_user_id,
                     title,
                     description: body,
                     tags,
+                    imagePaths: images,
                     videoPath: videoAsset?.path,
                     coverLandscapePath: mediaAssets.find((asset) => asset.kind === "cover_landscape")?.path || "",
                     coverPortraitPath: mediaAssets.find((asset) => asset.kind === "cover_portrait")?.path || "",
@@ -489,16 +494,16 @@ export async function POST(request: Request) {
         if (!response.ok)
           throw new Error(
             payload.error ||
-              (isSocialVideo ? "视频发布失败" : isWechatArticle ? "公众号草稿提交失败" : "知乎发布失败"),
+              (isBrowserPublish ? "平台内容发布失败" : isWechatArticle ? "公众号草稿提交失败" : "知乎发布失败"),
           );
         const publishedAt = new Date().toISOString();
-        const completedStatus = isSocialVideo && ["drafted", "scheduled", "published"].includes(String(payload.status))
+        const completedStatus = isBrowserPublish && ["drafted", "scheduled", "published"].includes(String(payload.status))
           ? String(payload.status)
           : isWechatArticle ? "drafted" : "published";
         const recordedPublishedAt = ["drafted", "scheduled"].includes(completedStatus) ? null : publishedAt;
         const detail = String(
           payload.detail ||
-            (isSocialVideo ? `${claim.account_platform === "douyin" ? "抖音" : "视频号"}视频已提交` : isWechatArticle ? "已写入公众号草稿箱" : "知乎专栏已发布"),
+            (isBrowserPublish ? `${claim.account_platform === "douyin" ? "抖音" : "视频号"}${claim.content_type === "douyin_image" ? "图文" : "视频"}已提交` : isWechatArticle ? "已写入公众号草稿箱" : "知乎专栏已发布"),
         );
         await db.batch([
           db
@@ -528,8 +533,8 @@ export async function POST(request: Request) {
           user.id,
           isWechatArticle
             ? "通过公众号开发者接口写入草稿箱"
-            : isSocialVideo
-              ? `通过浏览器提交${claim.account_platform === "douyin" ? "抖音" : "视频号"}视频`
+            : isBrowserPublish
+              ? `通过浏览器提交${claim.account_platform === "douyin" ? "抖音" : "视频号"}${claim.content_type === "douyin_image" ? "图文" : "视频"}`
             : claim.auth_method === "browser"
               ? "通过知乎浏览器发布专栏"
               : "通过知乎开放平台发布专栏",
@@ -581,8 +586,10 @@ export async function POST(request: Request) {
       publishDispatched = true;
       const result = await callMcpTool(
         port,
-        "publish_content",
-        { title, content: body, images, tags: cleanTags },
+        isXiaohongshuVideo ? "publish_video" : "publish_content",
+        isXiaohongshuVideo
+          ? { title, content: body, video: videoAsset?.path, tags: cleanTags }
+          : { title, content: body, images, tags: cleanTags },
         PUBLISH_TIMEOUT_MS,
       );
       const publishedAt = new Date().toISOString();
@@ -609,10 +616,10 @@ export async function POST(request: Request) {
       ]);
       await audit(
         user.id,
-        "通过小红书MCP发布内容",
+        isXiaohongshuVideo ? "通过小红书MCP发布视频" : "通过小红书MCP发布图文",
         "claim",
         claim.id,
-        `${claim.account_name} / 发布人 ${user.name} / ${images.length} 张图片`,
+        `${claim.account_name} / 发布人 ${user.name} / ${isXiaohongshuVideo ? "1 个视频" : `${images.length} 张图片`}`,
       );
       await runtime("release", claim.account_id);
       acquired = false;
@@ -625,8 +632,8 @@ export async function POST(request: Request) {
             ? "知乎发布失败"
           : isWechatArticle
             ? "公众号草稿提交失败"
-            : isSocialVideo
-              ? "视频发布失败"
+            : isBrowserPublish
+              ? "平台内容发布失败"
               : "小红书发布失败";
       const completedAt = new Date().toISOString();
       const uncertain = publishDispatched && isUncertainPublishError(message);
@@ -634,7 +641,7 @@ export async function POST(request: Request) {
         ? "知乎"
         : isWechatArticle
           ? "公众号草稿箱"
-          : isSocialVideo
+          : isBrowserPublish
             ? claim.account_platform === "douyin" ? "抖音创作者中心" : "视频号助手"
           : "小红书";
       const safeMessage = uncertain

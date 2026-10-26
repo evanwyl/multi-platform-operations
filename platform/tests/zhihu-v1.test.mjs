@@ -112,7 +112,7 @@ test("allows text-only Zhihu review but retains Xiaohongshu image review", async
   assert.match(ui, /文章正文配图为可选项，可直接审核/);
   assert.match(
     ui,
-    /isXiaohongshuClaim\(claim\)[\s\S]{0,120}!claim\.publish_images\?\.length/,
+    /isImageClaim\(claim\)[\s\S]{0,120}!claim\.publish_images\?\.length/,
   );
   assert.match(ui, /通过文章并转入发布/);
   assert.match(ui, /确认并发布专栏/);

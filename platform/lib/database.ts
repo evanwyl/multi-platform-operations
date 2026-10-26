@@ -176,14 +176,22 @@ let databaseInitialization: Promise<void> | null = null;
 async function initializeDatabase() {
   const db = database();
   const accessTableExisted = Boolean(
-    await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_account_access'").first(),
+    await db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='user_account_access'",
+      )
+      .first(),
   );
   for (const statement of schemaStatements) await db.prepare(statement).run();
   if (!accessTableExisted)
-    await db.prepare(`INSERT OR IGNORE INTO user_account_access (user_id,account_id,created_at)
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO user_account_access (user_id,account_id,created_at)
       SELECT u.id,a.id,? FROM users u CROSS JOIN accounts a
-      WHERE u.status='active' AND u.roles NOT LIKE '%"admin"%' AND a.is_demo=0`)
-      .bind(new Date().toISOString()).run();
+      WHERE u.status='active' AND u.roles NOT LIKE '%"admin"%' AND a.is_demo=0`,
+      )
+      .bind(new Date().toISOString())
+      .run();
   const portColumn = await db
     .prepare(
       "SELECT name FROM pragma_table_info('accounts') WHERE name='mcp_port'",
@@ -472,7 +480,7 @@ async function initializeDatabase() {
     .run();
   await db
     .prepare(
-      "UPDATE accounts SET status='login_expired' WHERE is_demo=0 AND xhs_user_id IS NULL AND status='online'",
+      "UPDATE accounts SET status='login_expired' WHERE platform='xiaohongshu' AND is_demo=0 AND xhs_user_id IS NULL AND status='online'",
     )
     .run();
   await db.prepare("DROP INDEX IF EXISTS idx_accounts_mcp_port_real").run();
@@ -491,7 +499,7 @@ async function initializeDatabase() {
       `UPDATE claims SET status='archived',updated_at=? WHERE id IN (
     SELECT id FROM (
       SELECT id,ROW_NUMBER() OVER (
-        PARTITION BY topic_id,account_id ORDER BY updated_at DESC,created_at ASC,id ASC
+        PARTITION BY topic_id,account_id,content_type ORDER BY updated_at DESC,created_at ASC,id ASC
       ) AS duplicate_rank
       FROM claims WHERE status NOT IN ('published','drafted','archived')
     ) WHERE duplicate_rank>1
@@ -499,11 +507,13 @@ async function initializeDatabase() {
     )
     .bind(new Date().toISOString())
     .run();
-  await db.prepare("DROP INDEX IF EXISTS idx_claims_active_topic_account").run();
+  await db
+    .prepare("DROP INDEX IF EXISTS idx_claims_active_topic_account")
+    .run();
   await db
     .prepare(
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_active_topic_account
-    ON claims(topic_id,account_id) WHERE status NOT IN ('published','drafted','archived')`,
+    ON claims(topic_id,account_id,content_type) WHERE status NOT IN ('published','drafted','archived')`,
     )
     .run();
   await db

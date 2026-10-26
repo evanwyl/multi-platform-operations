@@ -78,6 +78,7 @@ const binary =
 const promptFiles = {
   research: resolve(appRoot, "runtime/prompts/research-system.md"),
   content: resolve(appRoot, "runtime/prompts/content-system.md"),
+  douyinImageContent: resolve(appRoot, "runtime/prompts/douyin-image-system.md"),
   humanizer: resolve(appRoot, "runtime/prompts/humanizer-system.md"),
   zhihuContent: resolve(appRoot, "runtime/prompts/zhihu-content-system.md"),
   wechatContent: resolve(appRoot, "runtime/prompts/wechat-content-system.md"),
@@ -87,6 +88,7 @@ const analysisSchemas = {
   "candidate-screen": resolve(appRoot, "runtime/candidate-screen.schema.json"),
   "topic-analysis": resolve(appRoot, "runtime/topic-analysis.schema.json"),
   "content-draft": resolve(appRoot, "runtime/content-draft.schema.json"),
+  "douyin-image-draft": resolve(appRoot, "runtime/content-draft.schema.json"),
   "zhihu-article-draft": resolve(
     appRoot,
     "runtime/zhihu-article-draft.schema.json",
@@ -292,6 +294,17 @@ function systemPrompt(kind) {
       });
     }
     return `${readFileSync(promptFiles.zhihuContent, "utf8")}\n\n<EMBEDDED_HUMANIZER_SKILL>\n${readFileSync(promptFiles.humanizer, "utf8")}\n</EMBEDDED_HUMANIZER_SKILL>`;
+  }
+  if (kind === "douyin-image-draft") {
+    if (
+      !existsSync(promptFiles.douyinImageContent) ||
+      !existsSync(promptFiles.humanizer)
+    ) {
+      throw Object.assign(new Error("平台内置抖音图文编辑或 Humanizer 规则缺失"), {
+        status: 503,
+      });
+    }
+    return `${readFileSync(promptFiles.douyinImageContent, "utf8")}\n\n<EMBEDDED_HUMANIZER_SKILL>\n${readFileSync(promptFiles.humanizer, "utf8")}\n</EMBEDDED_HUMANIZER_SKILL>`;
   }
   if (kind !== "content-draft") {
     if (!existsSync(promptFiles.research))

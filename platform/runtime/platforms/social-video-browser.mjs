@@ -220,6 +220,45 @@ async function uploadDouyin(page, payload) {
   return submitLabel;
 }
 
+async function uploadDouyinImages(page, payload) {
+  const imagePaths = Array.isArray(payload.imagePaths) ? payload.imagePaths : [];
+  if (!imagePaths.length) throw new Error("抖音图文审核快照中没有图片");
+  const imageEntry = await visibleLocator(page, [
+    "button:has-text('发布图文')",
+    "[role='tab']:has-text('发布图文')",
+    "text=发布图文",
+    "button:has-text('图文')",
+  ], 20_000);
+  if (!imageEntry) throw new Error("抖音页面没有找到图文发布入口，页面结构可能已更新");
+  await imageEntry.click();
+  const fileInput = await visibleLocator(page, [
+    "input[type='file'][accept*='image']",
+    "input[type='file'][multiple]",
+    "input[type='file']",
+  ], 20_000);
+  if (!fileInput) throw new Error("抖音图文页面没有找到图片上传入口，页面结构可能已更新");
+  await fileInput.setInputFiles(imagePaths);
+  const title = await visibleLocator(page, [
+    "input[placeholder*='作品标题']",
+    "input[placeholder*='标题']",
+  ], 60_000);
+  if (title) await fillText(title, payload.title);
+  const description = await visibleLocator(page, [
+    "div.zone-container[contenteditable='true']",
+    "[contenteditable='true'][data-placeholder]",
+    "textarea[placeholder*='描述']",
+    "textarea[placeholder*='正文']",
+  ], 30_000);
+  if (!description) throw new Error("抖音图片上传后没有出现正文输入框");
+  const tagText = (payload.tags || []).map((tag) => `#${String(tag).replace(/^#+/, "").trim()}`).filter((tag) => tag.length > 1).join(" ");
+  await fillText(description, [payload.description, tagText].filter(Boolean).join("\n"));
+  const submitLabel = payload.mode === "draft" ? "保存草稿" : "发布";
+  const submit = await visibleLocator(page, [`button:text-is('${submitLabel}')`, `button:has-text('${submitLabel}')`], 120_000);
+  if (!submit || await submit.isDisabled().catch(() => true)) throw new Error(`抖音“${submitLabel}”按钮尚不可用，请检查图片和必填项`);
+  await submit.click();
+  return submitLabel;
+}
+
 async function openWechatChannelsComposer(page) {
   await page.goto(definitions.wechat_channels.publishUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
   const entry = await visibleLocator(page, ["button:has-text('发表视频')", "text=发表视频"], 30_000);
@@ -269,7 +308,13 @@ async function uploadWechatChannels(page, payload) {
 export async function publishSocialVideo(platformAccountRoot, appRoot, platform, payload) {
   const definition = platformDefinition(platform);
   const accountId = validAccountId(payload?.accountId);
-  if (!payload?.videoPath || !existsSync(payload.videoPath)) throw Object.assign(new Error("审核快照中的视频文件不存在"), { status: 409 });
+  const imagePost = platform === "douyin" && payload?.contentType === "douyin_image";
+  if (imagePost) {
+    if (!Array.isArray(payload.imagePaths) || !payload.imagePaths.length || payload.imagePaths.some((path) => !existsSync(path)))
+      throw Object.assign(new Error("审核快照中的图文图片不存在"), { status: 409 });
+  } else if (!payload?.videoPath || !existsSync(payload.videoPath)) {
+    throw Object.assign(new Error("审核快照中的视频文件不存在"), { status: 409 });
+  }
   const key = sessionKey(platform, accountId);
   const active = sessions.get(key);
   if (active) { await active.close().catch(() => undefined); sessions.delete(key); }
@@ -282,7 +327,11 @@ export async function publishSocialVideo(platformAccountRoot, appRoot, platform,
       throw Object.assign(new Error(`${definition.label}当前登录身份与任务绑定账号不一致，已阻止发布`), { status: 409 });
     const page = context.pages()[0] || await context.newPage();
     await page.goto(definition.publishUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
-    const submitLabel = platform === "douyin" ? await uploadDouyin(page, payload) : await uploadWechatChannels(page, payload);
+    const submitLabel = imagePost
+      ? await uploadDouyinImages(page, payload)
+      : platform === "douyin"
+        ? await uploadDouyin(page, payload)
+        : await uploadWechatChannels(page, payload);
     submitted = true;
     const successText = platform === "douyin"
       ? ["发布成功", "作品已发布", "已存入草稿"]

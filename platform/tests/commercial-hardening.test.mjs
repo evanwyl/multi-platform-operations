@@ -106,17 +106,17 @@ test("records publish jobs, attempts, and uncertain delivery outcomes", async ()
   );
 });
 
-test("enforces one active claim per topic and account at the database boundary", async () => {
+test("enforces one active claim per topic, account, and content format", async () => {
   const database = await source("lib/database.ts");
   const app = await source("app/api/app/route.ts");
   assert.match(
     database,
-    /ROW_NUMBER\(\) OVER \(\s*PARTITION BY topic_id,account_id/s,
+    /ROW_NUMBER\(\) OVER \(\s*PARTITION BY topic_id,account_id,content_type/s,
   );
   assert.match(database, /WHERE duplicate_rank>1/);
   assert.match(
     database,
-    /CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_active_topic_account\s+ON claims\(topic_id,account_id\) WHERE status NOT IN \('published','drafted','archived'\)/s,
+    /CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_active_topic_account\s+ON claims\(topic_id,account_id,content_type\) WHERE status NOT IN \('published','drafted','archived'\)/s,
   );
   const claimBlock = app.slice(
     app.indexOf('action === "claim_topic"'),

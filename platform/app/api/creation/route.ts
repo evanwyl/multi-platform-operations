@@ -8,6 +8,7 @@ import {
 import { can, forbidden, roleGroups } from "../../../lib/permissions";
 import { managerFetch } from "../../../lib/runtime-client";
 import { canAccessAccount } from "../../../lib/account-access";
+import { isImageContentType, isVideoContentType } from "../../../lib/platforms";
 
 type ImagePrompt = { label: string; prompt: string };
 
@@ -115,8 +116,8 @@ function normalizeCreative(
     contentType === "zhihu_article" ||
     contentType === "zhihu_answer" ||
     contentType === "wechat_article";
-  const videoContent =
-    contentType === "douyin_video" || contentType === "wechat_channels_video";
+  const videoContent = isVideoContentType(contentType);
+  const douyinContent = contentType === "douyin_image" || contentType === "douyin_video";
   const directPrompts = (
     Array.isArray(draft.image_prompts) ? draft.image_prompts : []
   )
@@ -125,11 +126,11 @@ function normalizeCreative(
     .filter((item) => item.prompt);
   return {
     title_options: textList(draft.title_options, 6).map((item) =>
-      item.slice(0, longArticle ? 100 : videoContent ? 55 : 20),
+      item.slice(0, longArticle ? 100 : videoContent || douyinContent ? 55 : 20),
     ),
     title: String(draft.title ?? "")
       .trim()
-      .slice(0, longArticle ? 100 : videoContent ? 55 : 20),
+      .slice(0, longArticle ? 100 : videoContent || douyinContent ? 55 : 20),
     body: String(draft.body ?? "")
       .trim()
       .slice(0, longArticle ? 20000 : videoContent ? 4000 : 1200),
@@ -243,6 +244,7 @@ function canEdit(user: DbUser, claim: ClaimContext) {
 async function runAI<T>(
   kind:
     | "content-draft"
+    | "douyin-image-draft"
     | "zhihu-article-draft"
     | "wechat-article-draft"
     | "wechat-cover-prompt",
@@ -485,10 +487,16 @@ export async function POST(request: Request) {
         return Response.json({ error: message }, { status: 502 });
       }
     }
+    if (isVideoContentType(claim.content_type))
+      return Response.json(
+        { error: "当前视频任务负责文案、封面和成片发布，请直接填写文案并上传成品视频" },
+        { status: 400 },
+      );
     const primaryReference = references[0] ?? null;
     const verificationReferences = references.slice(1);
     const rewriteMode = Boolean(primaryReference);
-    const prompt = `你是小红书资深内容编辑和视觉策划。请在同一次任务中，为一个真实团队完成一篇小红书图文笔记及其整套配图提示词。
+    const socialPlatform = claim.content_type === "douyin_image" ? "抖音图文" : "小红书图文笔记";
+    const prompt = `你是${socialPlatform}资深内容编辑和视觉策划。请在同一次任务中，为一个真实团队完成一篇${socialPlatform}及其整套配图提示词。
 
 选题：${claim.topic_title}
 发布账号：${claim.account_name}
@@ -507,7 +515,7 @@ export async function POST(request: Request) {
 辅助核验来源：${verificationReferences.length ? `共${verificationReferences.length}条，见下方 <VERIFICATION_SOURCES>` : "无"}
 
 要求：
-1. 标题不超过20字，具体可信，不承诺爆款，不虚构案例、数据或亲身经历。
+1. 标题不超过${claim.content_type === "douyin_image" ? 55 : 20}字，具体可信，不承诺爆款，不虚构案例、数据或亲身经历。
 2. 正文自然、可直接编辑发布，段落清晰；标签不要带#号。
 3. 先在内部完成最终标题和正文，再基于这份最终内容规划3到6张配图；这是一次 AI 调用和一次结构化返回，不要拆成后续任务。
 4. image_prompts 至少包含“封面主视觉”“核心观点图”“真实场景图”，可按内容增加对比场景、关键细节或情绪收尾。第一张必须是封面主视觉，并在画面中清晰呈现最终标题“最终 title 字段的逐字原文”；提示词必须写出这段标题原文、位置、主副层级、中文字体气质、字号占比、颜色对比和手机缩略图可读性，不能使用占位文字。每张图承担不同叙事作用，但保持同一篇帖子的视觉语言连贯。
@@ -536,7 +544,12 @@ ${JSON.stringify(verificationReferences)}
     try {
       const result = enforceCoverTitle(
         normalizeCreative(
-          await runAI<CreativeDraft>("content-draft", prompt),
+          await runAI<CreativeDraft>(
+            claim.content_type === "douyin_image"
+              ? "douyin-image-draft"
+              : "content-draft",
+            prompt,
+          ),
           claim.content_type,
         ),
       );
@@ -559,7 +572,7 @@ ${JSON.stringify(verificationReferences)}
 
   if (action === "save") {
     const draft =
-      claim.content_type === "xiaohongshu_note"
+      isImageContentType(claim.content_type)
         ? enforceCoverTitle(
             normalizeCreative(data.creative, claim.content_type),
           )
@@ -581,7 +594,7 @@ ${JSON.stringify(verificationReferences)}
     if (!version)
       return Response.json({ error: "历史版本不存在" }, { status: 404 });
     const creative =
-      claim.content_type === "xiaohongshu_note"
+      isImageContentType(claim.content_type)
         ? enforceCoverTitle(
             normalizeCreative(
               parseJson(version.creative_json, {}),
