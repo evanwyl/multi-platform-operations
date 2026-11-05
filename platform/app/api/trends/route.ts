@@ -4,13 +4,14 @@ import { callMcpTool } from "../../../lib/xhs-mcp";
 import { can, forbidden, roleGroups } from "../../../lib/permissions";
 import { managerFetch } from "../../../lib/runtime-client";
 import { accessibleAccountIds, canAccessAccount } from "../../../lib/account-access";
+import { syncTopicToIma } from "../../../lib/ima-sync";
 
 type Settings = {
   account_id: string | null; target_account_id: string | null; keywords: string; exclude_keywords: string;
   publish_time: string; sort_by: string; content_type: "image" | "video" | "all"; last_scanned_at: string | null; next_allowed_at: string | null;
 };
 type Scan = { id: string; account_id: string; target_account_id: string | null; keywords: string; keyword_plan: string; completed_keywords: string; content_type: "image" | "video" | "all"; status: string };
-type Account = { id: string; name: string; status: string; xhs_user_id: string | null; xhs_nickname: string | null; persona?: string; audience?: string; profile_bio?: string; content_pillars?: string; strategy_keywords?: string; excluded_topics?: string };
+type Account = { id: string; name: string; status: string; platform?: string; xhs_user_id: string | null; xhs_nickname: string | null; persona?: string; audience?: string; profile_bio?: string; content_pillars?: string; strategy_keywords?: string; excluded_topics?: string };
 type Feed = {
   id?: string; xsecToken?: string; modelType?: string; noteCard?: {
     type?: string; displayTitle?: string;
@@ -159,7 +160,7 @@ export async function GET(request: Request) {
       liked_count,collected_count,comment_count,shared_count,raw_heat_score,heat_score,published_at,selection_status,processing_status,capture_outcome,detail_error,status,first_seen_at,last_seen_at
       FROM trend_samples WHERE status!='archived' ORDER BY CASE status WHEN 'new' THEN 0 WHEN 'used' THEN 1 ELSE 2 END,last_seen_at DESC LIMIT 200`).all<DbRow>(),
     db.prepare("SELECT * FROM trend_scans ORDER BY started_at DESC LIMIT 10").all<DbRow>(),
-    db.prepare("SELECT id,name,status,xhs_user_id,xhs_nickname,persona,audience,profile_bio,content_pillars,strategy_keywords,excluded_topics FROM accounts WHERE is_demo=0 ORDER BY updated_at").all<DbRow>(),
+    db.prepare("SELECT id,name,status,platform,xhs_user_id,xhs_nickname,persona,audience,profile_bio,content_pillars,strategy_keywords,excluded_topics FROM accounts WHERE is_demo=0 AND platform='xiaohongshu' ORDER BY updated_at").all<DbRow>(),
   ]);
   const contentType = settings?.content_type || "image";
   const allowedAccountIds = await accessibleAccountIds(db, user);
@@ -200,7 +201,7 @@ export async function POST(request: Request) {
     const settings = await getSettings();
     if (!settings?.account_id) return Response.json({ error: "请先设置唯一主采集账号" }, { status: 409 });
     const targetAccountId = String(data.target_account_id ?? settings.target_account_id ?? "");
-    const target = await db.prepare(`SELECT id,name,persona,audience,profile_bio,content_pillars,strategy_keywords,excluded_topics FROM accounts WHERE id=? AND is_demo=0`)
+    const target = await db.prepare(`SELECT id,name,persona,audience,profile_bio,content_pillars,strategy_keywords,excluded_topics FROM accounts WHERE id=? AND is_demo=0 AND platform='xiaohongshu'`)
       .bind(targetAccountId).first<Account>();
     if (!target) return Response.json({ error: "请先选择本次研究服务的目标内容账号" }, { status: 400 });
     if (!(await canAccessAccount(db, user, target.id)) || !(await canAccessAccount(db, user, settings.account_id)))
@@ -247,7 +248,7 @@ export async function POST(request: Request) {
   if (action === "save_settings") {
     if (!roles(user).includes("admin")) return Response.json({ error: "只有管理员可以修改采集设置" }, { status: 403 });
     const accountId = String(data.account_id ?? "");
-    const account = await db.prepare("SELECT id FROM accounts WHERE id=? AND is_demo=0").bind(accountId).first();
+    const account = await db.prepare("SELECT id FROM accounts WHERE id=? AND is_demo=0 AND platform='xiaohongshu'").bind(accountId).first();
     if (!account) return Response.json({ error: "请选择一个真实账号作为主采集账号" }, { status: 400 });
     const keywords = cleanList(data.keywords, 3, 6);
     if (keywords.length < 3) return Response.json({ error: "请设置3-6个种子关键词" }, { status: 400 });
@@ -304,10 +305,10 @@ export async function POST(request: Request) {
     if (keywords.length < 3) return Response.json({ error: "主采集账号至少需要3个种子关键词" }, { status: 409 });
     const targetAccountId = String(data.target_account_id ?? settings.target_account_id ?? "");
     const requestText = String(data.request_text ?? "").slice(0, 300);
-    const targetAccount = await db.prepare("SELECT id,name,persona,audience FROM accounts WHERE id=? AND is_demo=0").bind(targetAccountId)
+    const targetAccount = await db.prepare("SELECT id,name,persona,audience FROM accounts WHERE id=? AND is_demo=0 AND platform='xiaohongshu'").bind(targetAccountId)
       .first<{ id: string; name: string; persona: string; audience: string }>();
     if (!targetAccount?.persona?.trim() || !targetAccount.audience?.trim()) return Response.json({ error: "目标内容账号定位不完整，请重新生成搜索计划" }, { status: 409 });
-    const account = await db.prepare("SELECT id,name,status,xhs_user_id,xhs_nickname FROM accounts WHERE id=? AND is_demo=0").bind(settings.account_id).first<Account>();
+    const account = await db.prepare("SELECT id,name,status,xhs_user_id,xhs_nickname FROM accounts WHERE id=? AND is_demo=0 AND platform='xiaohongshu'").bind(settings.account_id).first<Account>();
     if (!account) return Response.json({ error: "主采集账号记录不存在" }, { status: 409 });
     if (!(await canAccessAccount(db, user, account.id)) || !(await canAccessAccount(db, user, targetAccount.id)))
       return forbidden("你没有所选账号的操作权限");
@@ -487,7 +488,7 @@ export async function POST(request: Request) {
     const engagements = scanSamples.results.map((sample) => metricValue(sample.liked_count) + metricValue(sample.collected_count) * 1.5 + metricValue(sample.comment_count) * 2);
     const maxEngagement = Math.max(1, ...engagements);
     const heatScores = engagements.map((engagement) => Math.round(100 * Math.log1p(engagement) / Math.log1p(maxEngagement)));
-    const target = await db.prepare(`SELECT id,name,persona,audience,content_pillars,strategy_keywords,excluded_topics FROM accounts WHERE id=? AND is_demo=0`)
+    const target = await db.prepare(`SELECT id,name,persona,audience,content_pillars,strategy_keywords,excluded_topics FROM accounts WHERE id=? AND is_demo=0 AND platform='xiaohongshu'`)
       .bind(scan.target_account_id).first<Account>();
     if (!target) return Response.json({ error: "目标内容账号不存在，无法进行相关度初筛" }, { status: 409 });
     let keywordPlan: Record<string, unknown> = {};
@@ -627,7 +628,7 @@ export async function POST(request: Request) {
       intent_match_score,account_fit_score,prefilter_score
       FROM trend_samples WHERE last_seen_at>=? AND status!='archived' AND selection_status='selected' AND processing_status='success' AND detail_text!='' ORDER BY prefilter_score DESC,heat_score DESC,last_seen_at DESC LIMIT 24`).bind(scan.started_at).all<DbRow>();
     if (samples.results.length < 3) return Response.json({ error: "正文获取成功的爆款样本不足3条，已停止AI拆解和自动转入，请先补抓详情" }, { status: 409 });
-    const targetAccount = await db.prepare(`SELECT name,persona,audience,profile_bio,content_pillars,strategy_keywords,excluded_topics FROM accounts WHERE id=? AND is_demo=0`)
+    const targetAccount = await db.prepare(`SELECT name,persona,audience,profile_bio,content_pillars,strategy_keywords,excluded_topics FROM accounts WHERE id=? AND is_demo=0 AND platform='xiaohongshu'`)
       .bind(scan.target_account_id).first<Account>();
     if (!targetAccount) return Response.json({ error: "目标内容账号不存在，无法进行账号匹配分析" }, { status: 409 });
     const samplePayload = samples.results.map((sample) => ({
@@ -700,6 +701,7 @@ ${JSON.stringify(samplePayload)}
     if (!sampleIds.length) return Response.json({ error: "请至少选择一个待处理样本" }, { status: 400 });
     const statements = [];
     const createdTitles: string[] = [];
+    const createdTopicIds: string[] = [];
     for (const sampleId of sampleIds) {
       const sample = await db.prepare("SELECT id,feed_id,title,source_url,status,selection_status,processing_status,quality_tier,detail_text,content_summary,sample_hooks,sample_pain_point,sample_structure,practical_value,controversy_point,reusable_directions,account_adaptation,heat_score FROM trend_samples WHERE id=?").bind(sampleId).first<{ id: string; feed_id: string; title: string; source_url: string; status: string; selection_status: string; processing_status: string; quality_tier: string; detail_text: string; content_summary: string; sample_hooks: string; sample_pain_point: string; sample_structure: string; practical_value: string; controversy_point: string; reusable_directions: string; account_adaptation: string; heat_score: number }>();
       if (!sample || sample.status !== "new" || sample.selection_status !== "selected" || !["core", "unrated"].includes(sample.quality_tier) || sample.processing_status !== "success" || !sample.detail_text || !sample.content_summary) continue;
@@ -711,9 +713,11 @@ ${JSON.stringify(samplePayload)}
         db.prepare("UPDATE trend_samples SET status='used' WHERE id=? AND status='new'").bind(sample.id),
       );
       createdTitles.push(sample.title);
+      createdTopicIds.push(topicId);
     }
     if (statements.length) await db.batch(statements);
     await audit(user.id, "批量从高表现样本创建选题", "trend_sample", sampleIds.join(","), `${createdTitles.length} 个选题`);
+    for (const topicId of createdTopicIds) await syncTopicToIma(db, topicId);
     return Response.json({ ok: true, created: createdTitles.length, skipped: sampleIds.length - createdTitles.length }, { status: 201 });
   }
 
@@ -733,6 +737,7 @@ ${JSON.stringify(samplePayload)}
       db.prepare("UPDATE trend_samples SET status='used' WHERE id=?").bind(sample.id),
     ]);
     await audit(user.id, "从高表现样本创建原创选题", "topic", topicId, `参考：${sample.title}`);
+    await syncTopicToIma(db, topicId);
     return Response.json({ ok: true, topic_id: topicId }, { status: 201 });
   }
 

@@ -97,6 +97,13 @@ const schemaStatements = [
     object_type TEXT NOT NULL, object_id TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS knowledge_sync_links (
+    provider TEXT NOT NULL DEFAULT 'ima', entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
+    note_id TEXT NOT NULL DEFAULT '', media_id TEXT NOT NULL DEFAULT '', content_hash TEXT NOT NULL DEFAULT '',
+    sync_status TEXT NOT NULL DEFAULT 'pending', last_error TEXT NOT NULL DEFAULT '',
+    deleted_at TEXT, synced_at TEXT, updated_at TEXT NOT NULL,
+    PRIMARY KEY(provider,entity_type,entity_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS trend_settings (
     id TEXT PRIMARY KEY, account_id TEXT, target_account_id TEXT,
     keywords TEXT NOT NULL DEFAULT '[]', exclude_keywords TEXT NOT NULL DEFAULT '[]',
@@ -165,6 +172,7 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_media_assets_claim_kind ON media_assets(claim_id, kind, created_at)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_publish_attempts_job_number ON publish_attempts(job_id, attempt_number)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_knowledge_sync_status ON knowledge_sync_links(provider,sync_status,updated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_trend_samples_status_seen ON trend_samples(status, last_seen_at)`,
   `CREATE INDEX IF NOT EXISTS idx_trend_scans_started ON trend_scans(started_at)`,
   `CREATE INDEX IF NOT EXISTS idx_article_research_status_seen ON article_research_samples(status, last_seen_at)`,

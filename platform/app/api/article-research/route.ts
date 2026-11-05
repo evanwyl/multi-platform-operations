@@ -2,6 +2,7 @@ import { currentUser, rejectCrossSiteMutation } from "../../../lib/auth";
 import { audit, database, ensureDatabase } from "../../../lib/database";
 import { can, forbidden, roleGroups } from "../../../lib/permissions";
 import * as cheerio from "cheerio";
+import { syncTopicToIma } from "../../../lib/ima-sync";
 
 type SearchResult = { title?: string; url?: string; content?: string; publishedDate?: string; author?: string; engine?: string; engines?: string[] };
 
@@ -311,6 +312,7 @@ export async function POST(request: Request) {
       db.prepare("UPDATE article_research_entries SET status='used' WHERE sample_id=? AND platform=?").bind(sampleId, platform),
     ]);
     await audit(user.id, `从文章样本创建${platform === "wechat" ? "公众号" : "知乎SEO"}选题`, "article_research", sampleId, topicTitle);
+    await syncTopicToIma(db, topicId);
     return Response.json({ ok: true, topic_id: topicId });
   }
 

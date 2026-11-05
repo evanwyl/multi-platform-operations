@@ -16,7 +16,6 @@ import {
   CheckCircle,
   FileText,
   GearSix,
-  House,
   Lightbulb,
   ListMagnifyingGlass,
   PaperPlaneTilt,
@@ -234,6 +233,15 @@ type AISettings = {
   busy?: boolean;
   unavailable?: boolean;
 };
+type ImaSettings = {
+  configured: boolean;
+  clientId: string;
+  knowledgeBaseId: string;
+  knowledgeBaseName: string;
+  syncTopics: boolean;
+  syncPublished: boolean;
+  unavailable?: boolean;
+};
 type AppData = {
   user: User;
   accounts: Account[];
@@ -242,6 +250,7 @@ type AppData = {
   logs: Log[];
   users: User[];
   ai_settings: AISettings;
+  ima_settings: ImaSettings;
 };
 type TrendSettings = {
   account_id?: string;
@@ -578,8 +587,9 @@ function blankCreative(claim?: Claim): CreativeDraft {
 export default function PlatformApp() {
   const [auth, setAuth] = useState<AuthData | null>(null);
   const [data, setData] = useState<AppData | null>(null);
-  const [view, setView] = useState("dashboard");
+  const [view, setView] = useState("flow-content");
   const [contentTargetId, setContentTargetId] = useState("");
+  const [focusedTopicId, setFocusedTopicId] = useState("");
   const [contentAccountId, setContentAccountId] = useState("");
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [scopePlatform, setScopePlatform] = useState<PlatformId | "">("");
@@ -587,7 +597,7 @@ export default function PlatformApp() {
   const [expandedPlatforms, setExpandedPlatforms] = useState<
     Record<PlatformId, boolean>
   >({
-    xiaohongshu: true,
+    xiaohongshu: false,
     zhihu: false,
     wechat: false,
     douyin: false,
@@ -802,14 +812,26 @@ export default function PlatformApp() {
     target: string,
     platform: PlatformId,
     accountId = "",
+    topicId = "",
   ) {
     setScopePlatform(platform);
     setScopeAccountId(accountId);
     setExpandedPlatforms((current) => ({ ...current, [platform]: true }));
+    setFocusedTopicId(target === "topics" ? topicId : "");
     if (target === "content") {
       setContentAccountId(accountId);
       setContentTargetId("");
     }
+    setView(target);
+  }
+
+  function goFlowView(target: string) {
+    setScopePlatform("");
+    setScopeAccountId("");
+    setSelectedAccountId("");
+    setContentAccountId("");
+    setContentTargetId("");
+    setFocusedTopicId("");
     setView(target);
   }
 
@@ -859,30 +881,65 @@ export default function PlatformApp() {
           </div>
         </div>
         <nav aria-label="主要导航">
-          <div className="nav-group">
-            <span className="nav-group-label">总览</span>
-            <button
-              className={`nav-item ${view === "dashboard" ? "active" : ""}`}
-              aria-current={view === "dashboard" ? "page" : undefined}
-              onClick={() => {
-                setScopePlatform("");
-                setScopeAccountId("");
-                setSelectedAccountId("");
-                setView("dashboard");
-              }}
-            >
-              <span>
-                <House
-                  aria-hidden="true"
-                  size={18}
-                  weight={view === "dashboard" ? "fill" : "regular"}
-                />
-              </span>
-              工作台
-            </button>
+          <div className="nav-group operations-summary-nav">
+            <span className="nav-group-label">运营流程</span>
+            {[
+              [
+                "flow-topics",
+                Lightbulb,
+                "选题中心",
+                data.topics.length,
+              ],
+              [
+                "flow-content",
+                PenNib,
+                "内容创作",
+                data.claims.filter((claim) =>
+                  ["writing", "revision"].includes(claim.status),
+                ).length,
+              ],
+              [
+                "flow-review",
+                CheckCircle,
+                "审核中心",
+                data.claims.filter((claim) => claim.status === "review").length,
+              ],
+              [
+                "flow-publish",
+                PaperPlaneTilt,
+                "发布记录",
+                data.claims.filter(
+                  (claim) =>
+                    ["approved", "queued", "publishing", "failed"].includes(
+                      claim.status,
+                    ) && publishVisibleToCurrentUser(claim),
+                ).length,
+              ],
+            ].map(([id, FlowIcon, label, count]) => {
+              const active = view === id;
+              const IconComponent = FlowIcon as Icon;
+              return (
+                <button
+                  key={String(id)}
+                  className={`nav-item ${active ? "active" : ""}`}
+                  aria-current={active ? "page" : undefined}
+                  onClick={() => goFlowView(String(id))}
+                >
+                  <span>
+                    <IconComponent
+                      aria-hidden="true"
+                      size={18}
+                      weight={active ? "fill" : "regular"}
+                    />
+                  </span>
+                  {String(label)}
+                  {Number(count) > 0 ? <b>{Number(count)}</b> : null}
+                </button>
+              );
+            })}
           </div>
           <div className="nav-group platform-accordion-group">
-            <span className="nav-group-label">平台选择</span>
+            <span className="nav-group-label">账号与平台</span>
             {(
               [
                 "xiaohongshu",
@@ -1179,6 +1236,18 @@ export default function PlatformApp() {
               openClaim={openDashboardClaim}
             />
           )}
+          {view.startsWith("flow-") && (
+            <OperationsSummary
+              key={view}
+              kind={view.slice(5) as OperationsSummaryKind}
+              data={data}
+              publishVisible={publishVisibleToCurrentUser}
+              openClaim={openDashboardClaim}
+              openPlatform={(platform, target) =>
+                goPlatformView(target.target, platform, "", target.topicId)
+              }
+            />
+          )}
           {view === "account-workspace" && (
             <AccountWorkspace
               accountId={selectedAccountId}
@@ -1205,10 +1274,12 @@ export default function PlatformApp() {
           </div>
           {view === "topics" && (
             <Topics
+              key={scopePlatform || "xiaohongshu"}
               platform={scopePlatform || "xiaohongshu"}
               data={scopedData}
               action={action}
               busy={busy}
+              focusedTopicId={focusedTopicId}
             />
           )}
           <div
@@ -1280,6 +1351,312 @@ export default function PlatformApp() {
         </div>
       </section>
     </main>
+  );
+}
+
+type OperationsSummaryKind = "topics" | "content" | "review" | "publish";
+
+function Pagination({
+  page,
+  totalItems,
+  pageSize = 10,
+  onChange,
+}: {
+  page: number;
+  totalItems: number;
+  pageSize?: number;
+  onChange: (page: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  if (totalPages <= 1) return null;
+  const visiblePages = Array.from(
+    new Set(
+      [1, page - 1, page, page + 1, totalPages].filter(
+        (item) => item >= 1 && item <= totalPages,
+      ),
+    ),
+  );
+  return (
+    <nav className="content-pagination" aria-label="内容分页">
+      <button
+        type="button"
+        disabled={page <= 1}
+        onClick={() => onChange(page - 1)}
+      >
+        上一页
+      </button>
+      <div>
+        {visiblePages.map((item, index) => (
+          <span key={item}>
+            {index > 0 && item - visiblePages[index - 1] > 1 ? (
+              <i aria-hidden="true">…</i>
+            ) : null}
+            <button
+              type="button"
+              className={item === page ? "active" : ""}
+              aria-current={item === page ? "page" : undefined}
+              onClick={() => onChange(item)}
+            >
+              {item}
+            </button>
+          </span>
+        ))}
+      </div>
+      <button
+        type="button"
+        disabled={page >= totalPages}
+        onClick={() => onChange(page + 1)}
+      >
+        下一页
+      </button>
+    </nav>
+  );
+}
+
+function OperationsSummary({
+  kind,
+  data,
+  publishVisible,
+  openClaim,
+  openPlatform,
+}: {
+  kind: OperationsSummaryKind;
+  data: AppData;
+  publishVisible: (claim: Claim) => boolean;
+  openClaim: (claim: Claim) => void;
+  openPlatform: (
+    platform: PlatformId,
+    target: { target: string; topicId: string },
+  ) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [platformFilter, setPlatformFilter] = useState<PlatformId | "all">(
+    "all",
+  );
+  const [page, setPage] = useState(1);
+  const platformIds: PlatformId[] = [
+    "xiaohongshu",
+    "zhihu",
+    "wechat",
+    "douyin",
+    "wechat_channels",
+  ];
+  const copy = {
+    topics: {
+      kicker: "内容资产中心",
+      title: "所有选题，都有完整的来源记录",
+      intro: "统一检索选题、来源正文、认领状态和后续创作任务。",
+      empty: "当前没有选题记录。",
+    },
+    content: {
+      kicker: "今天 · 运营总览",
+      title: "先处理最重要的内容",
+      intro: "系统已结合团队任务、账号状态和发布进度整理了今天的优先事项。",
+      empty: "当前没有创作中或待修订的内容。",
+    },
+    review: {
+      kicker: "今天 · 审核总览",
+      title: "先处理最重要的审核任务",
+      intro: "跨平台查看待审核内容、负责人和风险提示，再进入对应平台完成审核。",
+      empty: "当前没有待审核内容。",
+    },
+    publish: {
+      kicker: "发布资产中心",
+      title: "所有发布，都有完整的流转记录",
+      intro: "统一查看待发布、发布中、失败和已完成记录，执行发布时仍进入对应平台。",
+      empty: "当前没有可查看的发布记录。",
+    },
+  }[kind];
+  const claimMatches = (claim: Claim) => {
+    if (kind === "content")
+      return ["writing", "revision"].includes(claim.status);
+    if (kind === "review") return claim.status === "review";
+    if (kind === "publish")
+      return (
+        [
+          "approved",
+          "queued",
+          "publishing",
+          "failed",
+          "published",
+          "drafted",
+          "scheduled",
+        ].includes(claim.status) && publishVisible(claim)
+      );
+    return false;
+  };
+  const visibleClaims = data.claims.filter(claimMatches);
+  const total = kind === "topics" ? data.topics.length : visibleClaims.length;
+  const platformCount = (platform: PlatformId) =>
+    kind === "topics"
+      ? data.topics.filter(
+          (topic) => (topic.platform || "xiaohongshu") === platform,
+        ).length
+      : visibleClaims.filter(
+          (claim) =>
+            (claim.account_platform || "xiaohongshu") === platform,
+        ).length;
+
+  const reviewCount = data.claims.filter(
+    (claim) => claim.status === "review",
+  ).length;
+  const creatingCount = data.claims.filter((claim) =>
+    ["writing", "revision"].includes(claim.status),
+  ).length;
+  const publishedCount = data.claims.filter((claim) =>
+    ["published", "drafted", "scheduled"].includes(claim.status),
+  ).length;
+  const pendingPublishCount = data.claims.filter(
+    (claim) =>
+      ["approved", "queued", "publishing", "failed"].includes(claim.status) &&
+      publishVisible(claim),
+  ).length;
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredTopics = data.topics.filter((topic) => {
+    const platform = (topic.platform || "xiaohongshu") as PlatformId;
+    return (
+      (platformFilter === "all" || platform === platformFilter) &&
+      (!normalizedQuery ||
+        `${topic.title} ${topic.creator_name} ${topic.source_author || ""}`
+          .toLowerCase()
+          .includes(normalizedQuery))
+    );
+  });
+  const filteredClaims = visibleClaims.filter((claim) => {
+    const platform = (claim.account_platform || "xiaohongshu") as PlatformId;
+    return (
+      (platformFilter === "all" || platform === platformFilter) &&
+      (!normalizedQuery ||
+        `${claim.title || claim.topic_title} ${claim.account_name} ${claim.owner_name}`
+          .toLowerCase()
+          .includes(normalizedQuery))
+    );
+  });
+  const overviewMode = kind === "content" || kind === "review";
+  const pageSize = 10;
+  const assetTotal =
+    kind === "topics" ? filteredTopics.length : filteredClaims.length;
+  const safePage = Math.min(page, Math.max(1, Math.ceil(assetTotal / pageSize)));
+  const pageStart = (safePage - 1) * pageSize;
+  const pagedTopics = filteredTopics.slice(pageStart, pageStart + pageSize);
+  const pagedClaims = filteredClaims.slice(pageStart, pageStart + pageSize);
+
+  return (
+    <div className={`page-stack operations-summary-page ops-${kind}`}>
+      <header className="ops-page-header">
+        <div>
+          <span className="section-kicker">{copy.kicker}</span>
+          <h1>{copy.title}</h1>
+          <p>{copy.intro}</p>
+        </div>
+      </header>
+
+      {overviewMode ? (
+        <>
+          <section className="ops-goal-hero">
+            <div>
+              <h2>从“操作页面”升级为“交付目标”</h2>
+              <p>
+                先确认目标，再进入对应平台完成创作、审核或发布；所有任务继续使用现有业务流程和权限。
+              </p>
+              <div className="ops-hero-chips">
+                <span><i />团队数据已同步</span>
+                <span>{data.accounts.length} 个账号</span>
+                <span>{data.claims.length} 条内容任务</span>
+              </div>
+            </div>
+            <div className="ops-health">
+              <strong>系统健康状态</strong>
+              <span>团队数据 <b>正常</b></span>
+              <span>账号资料 <b>正常</b></span>
+              <span>发布执行器 <b>{data.accounts.length} 个可用</b></span>
+              <span>最后同步 <b>刚刚</b></span>
+            </div>
+          </section>
+          <section className="ops-metrics" aria-label="运营数据概览">
+            {[
+              ["待认领选题", data.topics.filter((topic) => topic.status === "unclaimed").length, "等待负责人认领"],
+              ["创作进行中", creatingCount, "图文与视频任务"],
+              ["待审核内容", reviewCount, "需要审核员处理"],
+              ["累计已发布", publishedCount, `覆盖 ${platformIds.filter((id) => platformCount(id) > 0).length} 个平台`],
+            ].map(([label, value, note], index) => (
+              <article className="ops-metric" key={String(label)}>
+                <div><span>{String(label)}</span><i>{String(index + 1).padStart(2, "0")}</i></div>
+                <strong>{Number(value)}</strong>
+                <small>{String(note)}</small>
+              </article>
+            ))}
+          </section>
+          <section className="ops-overview-grid">
+            <article className="ops-task-card">
+              <div className="ops-card-head">
+                <div><h2>{kind === "review" ? "待处理审核任务" : "今天的内容执行计划"}</h2><p>每项任务都有平台、状态和负责人。</p></div>
+                <span>{visibleClaims.length} 项</span>
+              </div>
+              <div className="ops-task-list">
+                {(visibleClaims.length ? visibleClaims : data.claims).slice(0, 6).map((claim, index) => (
+                  <button type="button" key={claim.id} onClick={() => openClaim(claim)}>
+                    <i>{index + 1}</i>
+                    <span><strong>{claim.title || claim.topic_title}</strong><small>{platformLabel((claim.account_platform || "xiaohongshu") as PlatformId)} · {claim.account_name} · {claim.owner_name}</small></span>
+                    <b className={`status ${toneFor(claim.status)}`}>{claim.status_label}</b>
+                  </button>
+                ))}
+                {!data.claims.length ? <Empty title={copy.empty} text="新任务产生后会自动出现在这里。" /> : null}
+              </div>
+            </article>
+            <aside className="ops-discovery-card">
+              <div className="ops-card-head"><div><h2>运营发现</h2><p>来自现有内容和任务状态的提示。</p></div></div>
+              <div className="ops-signals">
+                <article><strong>{reviewCount ? `${reviewCount} 条内容等待审核` : "当前没有审核积压"}</strong><p>{reviewCount ? "建议优先处理等待时间最长的任务。" : "审核队列状态正常。"}</p></article>
+                <article><strong>{pendingPublishCount ? `${pendingPublishCount} 条内容准备发布` : "发布队列暂无待办"}</strong><p>正式发布仍需负责人或审核员确认。</p></article>
+                <article><strong>{data.topics.length} 个选题可供团队使用</strong><p>认领时选择平台、账号与内容类型。</p></article>
+              </div>
+            </aside>
+          </section>
+        </>
+      ) : (
+        <>
+          <section className="ops-asset-toolbar">
+            <label>
+              <ListMagnifyingGlass aria-hidden="true" size={18} />
+              <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="搜索选题、原文、草稿、发布记录或作品链接" />
+            </label>
+            <select aria-label="筛选平台" value={platformFilter} onChange={(event) => { setPlatformFilter(event.target.value as PlatformId | "all"); setPage(1); }}>
+              <option value="all">全部平台</option>
+              {platformIds.map((platform) => <option value={platform} key={platform}>{platformLabel(platform)}</option>)}
+            </select>
+          </section>
+          <div className="ops-asset-summary"><b>{kind === "topics" ? "选题资产库" : "发布记录库"}</b><span>统一保存完整流转信息，共 {total} 条。</span></div>
+          <section className="ops-asset-table">
+            <div className="ops-asset-head"><span>内容资产</span><span>流转平台</span><span>事实依据</span><span>当前阶段</span><span>负责人</span><span /></div>
+            {kind === "topics" ? pagedTopics.map((topic) => {
+              const platform = (topic.platform || "xiaohongshu") as PlatformId;
+              return <article className="ops-asset-row" key={topic.id}>
+                <div className="ops-asset-title"><span className={`platform-mini-mark ops-asset-platform-mark channel-${platform}`} aria-hidden="true">{platform === "xiaohongshu" ? "小" : platform === "zhihu" ? "知" : platform === "wechat" ? "微" : platform === "douyin" ? "抖" : "视"}</span><span><strong>{topic.title}</strong><small>{topic.source_author || topic.creator_name} · {topic.source_detail_verified ? "正文已核验" : "来源已记录"}</small></span></div>
+                <span className="ops-platform-tag">{platformLabel(platform)}</span>
+                <b className="ops-truth">{topic.source_detail_verified ? "正文完整 · 已核验" : "来源可追溯"}</b>
+                <span className="status orange">{topic.claim_status ? "已认领" : "待认领"}</span>
+                <span>{topic.claim_owner_name || "未分配"}</span>
+                <button onClick={() => openPlatform(platform, { target: "topics", topicId: topic.id })}>查看链路</button>
+              </article>;
+            }) : pagedClaims.map((claim) => {
+              const platform = (claim.account_platform || "xiaohongshu") as PlatformId;
+              return <article className="ops-asset-row" key={claim.id}>
+                <div className="ops-asset-title"><span className={`platform-mini-mark ops-asset-platform-mark channel-${platform}`} aria-hidden="true">{platform === "xiaohongshu" ? "小" : platform === "zhihu" ? "知" : platform === "wechat" ? "微" : platform === "douyin" ? "抖" : "视"}</span><span><strong>{claim.title || claim.topic_title}</strong><small>{claim.account_name} · {contentTypeLabel(claim)}</small></span></div>
+                <span className="ops-platform-tag">{platformLabel(platform)}</span>
+                <b className="ops-truth">{claim.publish_snapshot ? "审核快照 · 已冻结" : "内容版本可追溯"}</b>
+                <span className={`status ${toneFor(claim.status)}`}>{claim.status_label}</span>
+                <span>{claim.owner_name}</span>
+                <button onClick={() => openClaim(claim)}>查看链路</button>
+              </article>;
+            })}
+            {!(kind === "topics" ? filteredTopics.length : filteredClaims.length) ? <Empty title={copy.empty} text="调整筛选条件，或进入对应平台创建新任务。" /> : null}
+            <Pagination page={safePage} totalItems={assetTotal} pageSize={pageSize} onChange={setPage} />
+            <footer><span>团队内容记录 · 本机安全存储</span><span>第 {safePage} 页 · 每页 {pageSize} 条 · 共 {assetTotal} 条</span></footer>
+          </section>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -2370,11 +2747,13 @@ function Trends({
     const result = (await jsonRequest("/api/trends")) as TrendData;
     setData(result);
     setTargetAccountId(
-      (current) =>
-        current ||
-        result.settings?.target_account_id ||
-        result.accounts[0]?.id ||
-        "",
+      (current) => {
+        const candidates = result.accounts.map((account) => account.id);
+        if (candidates.includes(current)) return current;
+        if (result.settings?.target_account_id && candidates.includes(result.settings.target_account_id))
+          return result.settings.target_account_id;
+        return result.accounts[0]?.id || "";
+      },
     );
   }, []);
   useEffect(() => {
@@ -2382,11 +2761,13 @@ function Trends({
       .then((result) => {
         setData(result);
         setTargetAccountId(
-          (current) =>
-            current ||
-            result.settings?.target_account_id ||
-            result.accounts[0]?.id ||
-            "",
+          (current) => {
+            const candidates = result.accounts.map((account) => account.id);
+            if (candidates.includes(current)) return current;
+            if (result.settings?.target_account_id && candidates.includes(result.settings.target_account_id))
+              return result.settings.target_account_id;
+            return result.accounts[0]?.id || "";
+          },
         );
       })
       .catch((error) =>
@@ -3488,11 +3869,13 @@ function Topics({
   data,
   action,
   busy,
+  focusedTopicId,
 }: {
   platform: PlatformId;
   data: AppData;
   action: (payload: Record<string, unknown>, success: string) => void;
   busy: boolean;
+  focusedTopicId?: string;
 }) {
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
@@ -3500,9 +3883,26 @@ function Topics({
   const [accountId, setAccountId] = useState(data.accounts[0]?.id ?? "");
   const [angle, setAngle] = useState("");
   const [contentType, setContentType] = useState(defaultContentType(platform));
-  const [topicFilter, setTopicFilter] = useState("unclaimed");
+  const [topicFilter, setTopicFilter] = useState("all");
+  const [topicPage, setTopicPage] = useState(() => {
+    const focusedIndex = focusedTopicId
+      ? data.topics.findIndex((topic) => topic.id === focusedTopicId)
+      : -1;
+    return focusedIndex >= 0 ? Math.floor(focusedIndex / 10) + 1 : 1;
+  });
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [confirmingTopicDelete, setConfirmingTopicDelete] = useState(false);
+  useEffect(() => {
+    if (!focusedTopicId) return;
+    const topicIndex = data.topics.findIndex((topic) => topic.id === focusedTopicId);
+    if (topicIndex < 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        document.getElementById(`topic-${focusedTopicId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusedTopicId, data.topics]);
   const canOperate = data.user.roles.some((role) =>
     ["admin", "operator"].includes(role),
   );
@@ -3544,9 +3944,18 @@ function Topics({
   const activeGroup =
     topicGroups.find((group) => group.id === topicFilter) || topicGroups[0];
   const visibleTopics = data.topics.filter(activeGroup.matches);
+  const topicPageSize = 10;
+  const safeTopicPage = Math.min(
+    topicPage,
+    Math.max(1, Math.ceil(visibleTopics.length / topicPageSize)),
+  );
+  const pagedVisibleTopics = visibleTopics.slice(
+    (safeTopicPage - 1) * topicPageSize,
+    safeTopicPage * topicPageSize,
+  );
   const allVisibleTopicsSelected =
-    Boolean(visibleTopics.length) &&
-    visibleTopics.every((topic) => selectedTopics.includes(topic.id));
+    Boolean(pagedVisibleTopics.length) &&
+    pagedVisibleTopics.every((topic) => selectedTopics.includes(topic.id));
   const isZhihu = platform === "zhihu";
   const topicCopy =
     platform === "zhihu"
@@ -3768,7 +4177,10 @@ function Topics({
               <button
                 key={group.id}
                 className={topicFilter === group.id ? "active" : ""}
-                onClick={() => setTopicFilter(group.id)}
+                onClick={() => {
+                  setTopicFilter(group.id);
+                  setTopicPage(1);
+                }}
               >
                 {group.label}
                 <span>{count}</span>
@@ -3787,18 +4199,20 @@ function Topics({
                     allVisibleTopicsSelected
                       ? selectedTopics.filter(
                           (id) =>
-                            !visibleTopics.some((topic) => topic.id === id),
+                            !pagedVisibleTopics.some(
+                              (topic) => topic.id === id,
+                            ),
                         )
                       : Array.from(
                           new Set([
                             ...selectedTopics,
-                            ...visibleTopics.map((topic) => topic.id),
+                            ...pagedVisibleTopics.map((topic) => topic.id),
                           ]),
                         ),
                   )
                 }
               />
-              全选当前分类
+              全选当前页
             </label>
             <span>已选择 {selectedTopics.length} 个选题</span>
             <button
@@ -3822,9 +4236,10 @@ function Topics({
         ) : null}
         {visibleTopics.length ? (
           <div className="data-list topic-cards">
-            {visibleTopics.map((topic) => (
+            {pagedVisibleTopics.map((topic) => (
               <article
-                className={`topic-row ${topic.brief ? "analyzed" : ""} ${selectedTopics.includes(topic.id) ? "selected" : ""}`}
+                id={`topic-${topic.id}`}
+                className={`topic-row ${topic.brief ? "analyzed" : ""} ${selectedTopics.includes(topic.id) ? "selected" : ""} ${focusedTopicId === topic.id ? "focused" : ""}`}
                 key={topic.id}
               >
                 <label
@@ -3978,6 +4393,12 @@ function Topics({
                 ) : null}
               </article>
             ))}
+            <Pagination
+              page={safeTopicPage}
+              totalItems={visibleTopics.length}
+              pageSize={topicPageSize}
+              onChange={setTopicPage}
+            />
           </div>
         ) : (
           <Empty
@@ -5662,6 +6083,7 @@ function Review({
   notify: (message: string) => void;
 }) {
   const [reviewFilter, setReviewFilter] = useState("pending");
+  const [reviewPage, setReviewPage] = useState(1);
   const [comments, setComments] = useState<Record<string, string>>({});
   const [wechatPreview, setWechatPreview] = useState<{
     claim: Claim;
@@ -5717,6 +6139,15 @@ function Review({
     reviewGroups.find((group) => group.id === reviewFilter) || reviewGroups[0];
   const reviewHistory = data.claims.filter(reviewGroups[0].matches);
   const items = reviewHistory.filter(activeGroup.matches);
+  const reviewPageSize = 10;
+  const safeReviewPage = Math.min(
+    reviewPage,
+    Math.max(1, Math.ceil(items.length / reviewPageSize)),
+  );
+  const pagedReviewItems = items.slice(
+    (safeReviewPage - 1) * reviewPageSize,
+    safeReviewPage * reviewPageSize,
+  );
 
   return (
     <section className="panel data-panel">
@@ -5739,7 +6170,10 @@ function Review({
             <button
               key={group.id}
               className={reviewFilter === group.id ? "active" : ""}
-              onClick={() => setReviewFilter(group.id)}
+              onClick={() => {
+                setReviewFilter(group.id);
+                setReviewPage(1);
+              }}
             >
               {group.label}
               <span>{count}</span>
@@ -5749,7 +6183,7 @@ function Review({
       </div>
       {items.length ? (
         <div className="review-list">
-          {items.map((claim) => (
+          {pagedReviewItems.map((claim) => (
             <article className="review-card" key={claim.id}>
               <div className="review-card-head">
                 <span
@@ -5898,6 +6332,12 @@ function Review({
               )}
             </article>
           ))}
+          <Pagination
+            page={safeReviewPage}
+            totalItems={items.length}
+            pageSize={reviewPageSize}
+            onChange={setReviewPage}
+          />
         </div>
       ) : (
         <Empty
@@ -5961,6 +6401,7 @@ function Publish({
   notify: (message: string) => void;
 }) {
   const [filter, setFilter] = useState<"pending" | "published">("pending");
+  const [publishPage, setPublishPage] = useState(1);
   const [working, setWorking] = useState("");
   const [viewing, setViewing] = useState<Claim | null>(null);
   const [layoutPreview, setLayoutPreview] = useState<{
@@ -5983,6 +6424,15 @@ function Publish({
     ["published", "drafted", "scheduled"].includes(claim.status),
   );
   const items = filter === "pending" ? pending : published;
+  const publishPageSize = 10;
+  const safePublishPage = Math.min(
+    publishPage,
+    Math.max(1, Math.ceil(items.length / publishPageSize)),
+  );
+  const pagedPublishItems = items.slice(
+    (safePublishPage - 1) * publishPageSize,
+    safePublishPage * publishPageSize,
+  );
 
   async function previewWechatLayout(claim: Claim) {
     setWorking(claim.id);
@@ -6137,13 +6587,19 @@ function Publish({
           <div className="publish-tabs">
             <button
               className={filter === "pending" ? "active" : ""}
-              onClick={() => setFilter("pending")}
+              onClick={() => {
+                setFilter("pending");
+                setPublishPage(1);
+              }}
             >
               未发布 {pending.length}
             </button>
             <button
               className={filter === "published" ? "active" : ""}
-              onClick={() => setFilter("published")}
+              onClick={() => {
+                setFilter("published");
+                setPublishPage(1);
+              }}
             >
               完成记录 {published.length}
             </button>
@@ -6151,7 +6607,7 @@ function Publish({
         </div>
         {items.length ? (
           <div className="publish-list">
-            {items.map((claim) => (
+            {pagedPublishItems.map((claim) => (
               <article className="publish-card" key={claim.id}>
                 <div className="publish-card-main">
                   <span
@@ -6324,6 +6780,12 @@ function Publish({
                 )}
               </article>
             ))}
+            <Pagination
+              page={safePublishPage}
+              totalItems={items.length}
+              pageSize={publishPageSize}
+              onChange={setPublishPage}
+            />
           </div>
         ) : (
           <Empty
@@ -7345,9 +7807,36 @@ function Settings({
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState(data.ai_settings.baseUrl);
   const [model, setModel] = useState(data.ai_settings.model);
+  const [imaClientId, setImaClientId] = useState("");
+  const [imaApiKey, setImaApiKey] = useState("");
+  const [imaKnowledgeBaseId, setImaKnowledgeBaseId] = useState(data.ima_settings.knowledgeBaseId);
+  const [imaKnowledgeBaseName, setImaKnowledgeBaseName] = useState(data.ima_settings.knowledgeBaseName);
+  const [imaKnowledgeBases, setImaKnowledgeBases] = useState<Array<{ id: string; name: string }>>([]);
+  const [imaSyncTopics, setImaSyncTopics] = useState(data.ima_settings.syncTopics);
+  const [imaSyncPublished, setImaSyncPublished] = useState(data.ima_settings.syncPublished);
+  const [imaBusy, setImaBusy] = useState(false);
+  const [imaMessage, setImaMessage] = useState("");
   const isAdmin = data.user.roles.includes("admin");
   const ai = data.ai_settings;
   const environmentManaged = ai.keySource === "environment";
+  async function imaRequest(payload: Record<string, unknown>) {
+    setImaBusy(true);
+    setImaMessage("");
+    try {
+      const result = await jsonRequest("/api/ima", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }) as { knowledgeBases?: Array<{ id: string; name: string }>; synced?: number; failed?: number };
+      if (result.knowledgeBases) {
+        setImaKnowledgeBases(result.knowledgeBases);
+        if (!imaKnowledgeBaseId && result.knowledgeBases[0]) {
+          setImaKnowledgeBaseId(result.knowledgeBases[0].id);
+          setImaKnowledgeBaseName(result.knowledgeBases[0].name);
+        }
+        setImaMessage(`连接成功，发现 ${result.knowledgeBases.length} 个可写知识库`);
+      } else if (payload.action === "sync_history") setImaMessage(`历史记录同步完成：成功 ${result.synced || 0}，失败 ${result.failed || 0}`);
+      else setImaMessage("IMA 自动同步配置已保存");
+    } catch (error) {
+      setImaMessage(error instanceof Error ? error.message : "IMA 操作失败");
+    } finally { setImaBusy(false); }
+  }
   function removeMember(member: User) {
     if (
       !window.confirm(
@@ -7560,6 +8049,31 @@ function Settings({
             ) : null}
           </div>
         </form>
+      </section>
+      <section className="panel settings-card ai-settings-card">
+        <div className="settings-title">
+          <div><span className="section-kicker">团队知识库</span><h2>IMA 自动同步</h2></div>
+          <span className={`ai-connection-state ${data.ima_settings.configured ? "ready" : ""}`}>{data.ima_settings.unavailable ? "运行管理器未连接" : data.ima_settings.configured ? "已连接" : "待配置"}</span>
+        </div>
+        <p className="ai-settings-intro">平台是唯一事实源。新选题与发布结果会自动写入 IMA；平台删除选题时，IMA 追加“已从平台删除”标记并停止后续同步，不执行物理删除。</p>
+        <div className="ai-settings-form">
+          <label>Client ID<input value={imaClientId} onChange={(event) => setImaClientId(event.target.value)} disabled={!isAdmin} placeholder={data.ima_settings.clientId || "IMA Client ID"} /></label>
+          <label>API Key<input type="password" value={imaApiKey} onChange={(event) => setImaApiKey(event.target.value)} disabled={!isAdmin} placeholder={data.ima_settings.configured ? "已保存；留空不会替换" : "仅保存到本机"} /></label>
+          <label>同步到知识库
+            <select value={imaKnowledgeBaseId} disabled={!isAdmin} onChange={(event) => { const item = imaKnowledgeBases.find((base) => base.id === event.target.value); setImaKnowledgeBaseId(event.target.value); setImaKnowledgeBaseName(item?.name || data.ima_settings.knowledgeBaseName); }}>
+              {imaKnowledgeBaseId ? <option value={imaKnowledgeBaseId}>{imaKnowledgeBaseName || imaKnowledgeBaseId}</option> : <option value="">先测试连接</option>}
+              {imaKnowledgeBases.filter((base) => base.id !== imaKnowledgeBaseId).map((base) => <option key={base.id} value={base.id}>{base.name}</option>)}
+            </select>
+          </label>
+          <label><input type="checkbox" checked={imaSyncTopics} onChange={(event) => setImaSyncTopics(event.target.checked)} /> 自动同步新增选题与逻辑删除</label>
+          <label><input type="checkbox" checked={imaSyncPublished} onChange={(event) => setImaSyncPublished(event.target.checked)} /> 自动同步已发布内容（含公众号草稿箱）</label>
+          {imaMessage ? <p className="helper">{imaMessage}</p> : null}
+          {isAdmin ? <div className="ai-settings-actions">
+            <button type="button" className="outline" disabled={imaBusy || (!imaApiKey && !data.ima_settings.configured)} onClick={() => imaRequest({ action: "test", client_id: imaClientId, api_key: imaApiKey })}>测试并读取知识库</button>
+            <button type="button" className="outline" disabled={imaBusy || !data.ima_settings.configured} onClick={() => imaRequest({ action: "sync_history" })}>同步现有记录</button>
+            <button type="button" className="primary" disabled={imaBusy || !imaKnowledgeBaseId} onClick={() => imaRequest({ action: "save", client_id: imaClientId, api_key: imaApiKey, knowledge_base_id: imaKnowledgeBaseId, knowledge_base_name: imaKnowledgeBaseName, sync_topics: imaSyncTopics, sync_published: imaSyncPublished })}>保存自动同步</button>
+          </div> : null}
+        </div>
       </section>
       {adding ? (
         <div className="modal-backdrop">

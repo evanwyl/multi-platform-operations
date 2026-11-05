@@ -252,7 +252,7 @@ const runtimePackage = {
   private: true,
   type: "module",
   dependencies: {
-    wrangler: "4.132.0",
+    wrangler: "4.152.0",
     "playwright-core": "1.55.0",
     marked: "18.0.13",
     "sanitize-html": "2.17.7",

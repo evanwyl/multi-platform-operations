@@ -44,6 +44,7 @@ import {
   renderWechatMarkdown,
   wechatThemes,
 } from "./platforms/wechat-markdown.mjs";
+import { imaSettings, saveImaSettings, syncImaRecord, testImaSettings } from "./platforms/ima-openapi.mjs";
 
 const HOST = "127.0.0.1";
 const MANAGER_PORT = Number(process.env.MANAGER_PORT || 18100);
@@ -1198,6 +1199,18 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "POST" && url.pathname === "/ai/cancel") {
       return json(response, 200, { ok: true, cancelled: cancelAnalysis() });
+    }
+    if (request.method === "GET" && url.pathname === "/ima/settings") {
+      return json(response, 200, imaSettings(configRoot));
+    }
+    if (request.method === "POST" && url.pathname === "/ima/test") {
+      return json(response, 200, await testImaSettings(configRoot, await body(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/ima/settings") {
+      return json(response, 200, saveImaSettings(configRoot, await body(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/ima/sync") {
+      return json(response, 200, await syncImaRecord(configRoot, await body(request)));
     }
     if (request.method === "POST" && url.pathname === "/publish-assets") {
       const payload = await body(request);
