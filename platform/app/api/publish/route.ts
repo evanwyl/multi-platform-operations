@@ -4,6 +4,7 @@ import { callMcpTool, checkMcpLogin, readMcpIdentity } from "../../../lib/xhs-mc
 import { can, forbidden, roleGroups } from "../../../lib/permissions";
 import { managerFetch } from "../../../lib/runtime-client";
 import { canAccessAccount } from "../../../lib/account-access";
+import { syncPublishedToIma } from "../../../lib/ima-sync";
 
 type PublishClaim = {
   id: string;
@@ -309,6 +310,7 @@ export async function POST(request: Request) {
       claim.id,
       reason,
     );
+    if (outcome === "published") await syncPublishedToIma(db, claim.id);
     return Response.json({ ok: true, status: outcome });
   }
 
@@ -542,6 +544,7 @@ export async function POST(request: Request) {
           claim.id,
           `${claim.account_name} / 操作人 ${user.name}${payload.url ? ` / ${payload.url}` : ""}`,
         );
+        await syncPublishedToIma(db, claim.id);
         return Response.json({
           ok: true,
           status: completedStatus,
@@ -621,6 +624,7 @@ export async function POST(request: Request) {
         claim.id,
         `${claim.account_name} / 发布人 ${user.name} / ${isXiaohongshuVideo ? "1 个视频" : `${images.length} 张图片`}`,
       );
+      await syncPublishedToIma(db, claim.id);
       await runtime("release", claim.account_id);
       acquired = false;
       return Response.json({ ok: true, published_at: publishedAt, detail });

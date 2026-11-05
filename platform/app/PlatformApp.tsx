@@ -233,6 +233,15 @@ type AISettings = {
   busy?: boolean;
   unavailable?: boolean;
 };
+type ImaSettings = {
+  configured: boolean;
+  clientId: string;
+  knowledgeBaseId: string;
+  knowledgeBaseName: string;
+  syncTopics: boolean;
+  syncPublished: boolean;
+  unavailable?: boolean;
+};
 type AppData = {
   user: User;
   accounts: Account[];
@@ -241,6 +250,7 @@ type AppData = {
   logs: Log[];
   users: User[];
   ai_settings: AISettings;
+  ima_settings: ImaSettings;
 };
 type TrendSettings = {
   account_id?: string;
@@ -579,6 +589,7 @@ export default function PlatformApp() {
   const [data, setData] = useState<AppData | null>(null);
   const [view, setView] = useState("flow-content");
   const [contentTargetId, setContentTargetId] = useState("");
+  const [focusedTopicId, setFocusedTopicId] = useState("");
   const [contentAccountId, setContentAccountId] = useState("");
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [scopePlatform, setScopePlatform] = useState<PlatformId | "">("");
@@ -801,10 +812,12 @@ export default function PlatformApp() {
     target: string,
     platform: PlatformId,
     accountId = "",
+    topicId = "",
   ) {
     setScopePlatform(platform);
     setScopeAccountId(accountId);
     setExpandedPlatforms((current) => ({ ...current, [platform]: true }));
+    setFocusedTopicId(target === "topics" ? topicId : "");
     if (target === "content") {
       setContentAccountId(accountId);
       setContentTargetId("");
@@ -818,6 +831,7 @@ export default function PlatformApp() {
     setSelectedAccountId("");
     setContentAccountId("");
     setContentTargetId("");
+    setFocusedTopicId("");
     setView(target);
   }
 
@@ -1230,7 +1244,7 @@ export default function PlatformApp() {
               publishVisible={publishVisibleToCurrentUser}
               openClaim={openDashboardClaim}
               openPlatform={(platform, target) =>
-                goPlatformView(target, platform)
+                goPlatformView(target.target, platform, "", target.topicId)
               }
             />
           )}
@@ -1265,6 +1279,7 @@ export default function PlatformApp() {
               data={scopedData}
               action={action}
               busy={busy}
+              focusedTopicId={focusedTopicId}
             />
           )}
           <div
@@ -1409,7 +1424,10 @@ function OperationsSummary({
   data: AppData;
   publishVisible: (claim: Claim) => boolean;
   openClaim: (claim: Claim) => void;
-  openPlatform: (platform: PlatformId, target: string) => void;
+  openPlatform: (
+    platform: PlatformId,
+    target: { target: string; topicId: string },
+  ) => void;
 }) {
   const [query, setQuery] = useState("");
   const [platformFilter, setPlatformFilter] = useState<PlatformId | "all">(
@@ -1619,7 +1637,7 @@ function OperationsSummary({
                 <b className="ops-truth">{topic.source_detail_verified ? "正文完整 · 已核验" : "来源可追溯"}</b>
                 <span className="status orange">{topic.claim_status ? "已认领" : "待认领"}</span>
                 <span>{topic.claim_owner_name || "未分配"}</span>
-                <button onClick={() => openPlatform(platform, "topics")}>查看链路</button>
+                <button onClick={() => openPlatform(platform, { target: "topics", topicId: topic.id })}>查看链路</button>
               </article>;
             }) : pagedClaims.map((claim) => {
               const platform = (claim.account_platform || "xiaohongshu") as PlatformId;
@@ -2729,11 +2747,13 @@ function Trends({
     const result = (await jsonRequest("/api/trends")) as TrendData;
     setData(result);
     setTargetAccountId(
-      (current) =>
-        current ||
-        result.settings?.target_account_id ||
-        result.accounts[0]?.id ||
-        "",
+      (current) => {
+        const candidates = result.accounts.map((account) => account.id);
+        if (candidates.includes(current)) return current;
+        if (result.settings?.target_account_id && candidates.includes(result.settings.target_account_id))
+          return result.settings.target_account_id;
+        return result.accounts[0]?.id || "";
+      },
     );
   }, []);
   useEffect(() => {
@@ -2741,11 +2761,13 @@ function Trends({
       .then((result) => {
         setData(result);
         setTargetAccountId(
-          (current) =>
-            current ||
-            result.settings?.target_account_id ||
-            result.accounts[0]?.id ||
-            "",
+          (current) => {
+            const candidates = result.accounts.map((account) => account.id);
+            if (candidates.includes(current)) return current;
+            if (result.settings?.target_account_id && candidates.includes(result.settings.target_account_id))
+              return result.settings.target_account_id;
+            return result.accounts[0]?.id || "";
+          },
         );
       })
       .catch((error) =>
@@ -3847,11 +3869,13 @@ function Topics({
   data,
   action,
   busy,
+  focusedTopicId,
 }: {
   platform: PlatformId;
   data: AppData;
   action: (payload: Record<string, unknown>, success: string) => void;
   busy: boolean;
+  focusedTopicId?: string;
 }) {
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
@@ -3860,9 +3884,25 @@ function Topics({
   const [angle, setAngle] = useState("");
   const [contentType, setContentType] = useState(defaultContentType(platform));
   const [topicFilter, setTopicFilter] = useState("all");
-  const [topicPage, setTopicPage] = useState(1);
+  const [topicPage, setTopicPage] = useState(() => {
+    const focusedIndex = focusedTopicId
+      ? data.topics.findIndex((topic) => topic.id === focusedTopicId)
+      : -1;
+    return focusedIndex >= 0 ? Math.floor(focusedIndex / 10) + 1 : 1;
+  });
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [confirmingTopicDelete, setConfirmingTopicDelete] = useState(false);
+  useEffect(() => {
+    if (!focusedTopicId) return;
+    const topicIndex = data.topics.findIndex((topic) => topic.id === focusedTopicId);
+    if (topicIndex < 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        document.getElementById(`topic-${focusedTopicId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusedTopicId, data.topics]);
   const canOperate = data.user.roles.some((role) =>
     ["admin", "operator"].includes(role),
   );
@@ -4198,7 +4238,8 @@ function Topics({
           <div className="data-list topic-cards">
             {pagedVisibleTopics.map((topic) => (
               <article
-                className={`topic-row ${topic.brief ? "analyzed" : ""} ${selectedTopics.includes(topic.id) ? "selected" : ""}`}
+                id={`topic-${topic.id}`}
+                className={`topic-row ${topic.brief ? "analyzed" : ""} ${selectedTopics.includes(topic.id) ? "selected" : ""} ${focusedTopicId === topic.id ? "focused" : ""}`}
                 key={topic.id}
               >
                 <label
@@ -7766,9 +7807,36 @@ function Settings({
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState(data.ai_settings.baseUrl);
   const [model, setModel] = useState(data.ai_settings.model);
+  const [imaClientId, setImaClientId] = useState("");
+  const [imaApiKey, setImaApiKey] = useState("");
+  const [imaKnowledgeBaseId, setImaKnowledgeBaseId] = useState(data.ima_settings.knowledgeBaseId);
+  const [imaKnowledgeBaseName, setImaKnowledgeBaseName] = useState(data.ima_settings.knowledgeBaseName);
+  const [imaKnowledgeBases, setImaKnowledgeBases] = useState<Array<{ id: string; name: string }>>([]);
+  const [imaSyncTopics, setImaSyncTopics] = useState(data.ima_settings.syncTopics);
+  const [imaSyncPublished, setImaSyncPublished] = useState(data.ima_settings.syncPublished);
+  const [imaBusy, setImaBusy] = useState(false);
+  const [imaMessage, setImaMessage] = useState("");
   const isAdmin = data.user.roles.includes("admin");
   const ai = data.ai_settings;
   const environmentManaged = ai.keySource === "environment";
+  async function imaRequest(payload: Record<string, unknown>) {
+    setImaBusy(true);
+    setImaMessage("");
+    try {
+      const result = await jsonRequest("/api/ima", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }) as { knowledgeBases?: Array<{ id: string; name: string }>; synced?: number; failed?: number };
+      if (result.knowledgeBases) {
+        setImaKnowledgeBases(result.knowledgeBases);
+        if (!imaKnowledgeBaseId && result.knowledgeBases[0]) {
+          setImaKnowledgeBaseId(result.knowledgeBases[0].id);
+          setImaKnowledgeBaseName(result.knowledgeBases[0].name);
+        }
+        setImaMessage(`连接成功，发现 ${result.knowledgeBases.length} 个可写知识库`);
+      } else if (payload.action === "sync_history") setImaMessage(`历史记录同步完成：成功 ${result.synced || 0}，失败 ${result.failed || 0}`);
+      else setImaMessage("IMA 自动同步配置已保存");
+    } catch (error) {
+      setImaMessage(error instanceof Error ? error.message : "IMA 操作失败");
+    } finally { setImaBusy(false); }
+  }
   function removeMember(member: User) {
     if (
       !window.confirm(
@@ -7981,6 +8049,31 @@ function Settings({
             ) : null}
           </div>
         </form>
+      </section>
+      <section className="panel settings-card ai-settings-card">
+        <div className="settings-title">
+          <div><span className="section-kicker">团队知识库</span><h2>IMA 自动同步</h2></div>
+          <span className={`ai-connection-state ${data.ima_settings.configured ? "ready" : ""}`}>{data.ima_settings.unavailable ? "运行管理器未连接" : data.ima_settings.configured ? "已连接" : "待配置"}</span>
+        </div>
+        <p className="ai-settings-intro">平台是唯一事实源。新选题与发布结果会自动写入 IMA；平台删除选题时，IMA 追加“已从平台删除”标记并停止后续同步，不执行物理删除。</p>
+        <div className="ai-settings-form">
+          <label>Client ID<input value={imaClientId} onChange={(event) => setImaClientId(event.target.value)} disabled={!isAdmin} placeholder={data.ima_settings.clientId || "IMA Client ID"} /></label>
+          <label>API Key<input type="password" value={imaApiKey} onChange={(event) => setImaApiKey(event.target.value)} disabled={!isAdmin} placeholder={data.ima_settings.configured ? "已保存；留空不会替换" : "仅保存到本机"} /></label>
+          <label>同步到知识库
+            <select value={imaKnowledgeBaseId} disabled={!isAdmin} onChange={(event) => { const item = imaKnowledgeBases.find((base) => base.id === event.target.value); setImaKnowledgeBaseId(event.target.value); setImaKnowledgeBaseName(item?.name || data.ima_settings.knowledgeBaseName); }}>
+              {imaKnowledgeBaseId ? <option value={imaKnowledgeBaseId}>{imaKnowledgeBaseName || imaKnowledgeBaseId}</option> : <option value="">先测试连接</option>}
+              {imaKnowledgeBases.filter((base) => base.id !== imaKnowledgeBaseId).map((base) => <option key={base.id} value={base.id}>{base.name}</option>)}
+            </select>
+          </label>
+          <label><input type="checkbox" checked={imaSyncTopics} onChange={(event) => setImaSyncTopics(event.target.checked)} /> 自动同步新增选题与逻辑删除</label>
+          <label><input type="checkbox" checked={imaSyncPublished} onChange={(event) => setImaSyncPublished(event.target.checked)} /> 自动同步已发布内容（含公众号草稿箱）</label>
+          {imaMessage ? <p className="helper">{imaMessage}</p> : null}
+          {isAdmin ? <div className="ai-settings-actions">
+            <button type="button" className="outline" disabled={imaBusy || (!imaApiKey && !data.ima_settings.configured)} onClick={() => imaRequest({ action: "test", client_id: imaClientId, api_key: imaApiKey })}>测试并读取知识库</button>
+            <button type="button" className="outline" disabled={imaBusy || !data.ima_settings.configured} onClick={() => imaRequest({ action: "sync_history" })}>同步现有记录</button>
+            <button type="button" className="primary" disabled={imaBusy || !imaKnowledgeBaseId} onClick={() => imaRequest({ action: "save", client_id: imaClientId, api_key: imaApiKey, knowledge_base_id: imaKnowledgeBaseId, knowledge_base_name: imaKnowledgeBaseName, sync_topics: imaSyncTopics, sync_published: imaSyncPublished })}>保存自动同步</button>
+          </div> : null}
+        </div>
       </section>
       {adding ? (
         <div className="modal-backdrop">

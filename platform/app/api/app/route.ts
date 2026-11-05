@@ -15,6 +15,7 @@ import {
   requiresReviewImages,
 } from "../../../lib/platforms";
 import { accessibleAccountIds, canAccessAccount } from "../../../lib/account-access";
+import { syncTopicToIma } from "../../../lib/ima-sync";
 
 const statusLabels: Record<string, string> = {
   writing: "创作中",
@@ -80,6 +81,12 @@ async function runtimeAI(path: "settings" | "test", options?: RequestInit) {
   return payload;
 }
 
+async function runtimeImaSettings() {
+  const response = await managerFetch("/ima/settings");
+  if (!response.ok) throw new Error("IMA 配置读取失败");
+  return response.json();
+}
+
 export async function GET(request: Request) {
   await ensureDatabase();
   let user;
@@ -89,7 +96,7 @@ export async function GET(request: Request) {
     return response as Response;
   }
   const db = database();
-  const [accounts, topics, claims, logs, users, mediaAssets, aiSettings] = await Promise.all(
+  const [accounts, topics, claims, logs, users, mediaAssets, aiSettings, imaSettings] = await Promise.all(
     [
       db
         .prepare(
@@ -145,6 +152,7 @@ export async function GET(request: Request) {
         keySource: "none",
         unavailable: true,
       })),
+      runtimeImaSettings().catch(() => ({ configured: false, clientId: "", knowledgeBaseId: "", knowledgeBaseName: "", syncTopics: true, syncPublished: true, unavailable: true })),
     ],
   );
   const allowedAccountIds = await accessibleAccountIds(db, user);
@@ -205,6 +213,7 @@ export async function GET(request: Request) {
       account_ids: accessRows.results.filter((item) => item.user_id === row.id).map((item) => item.account_id),
     })),
     ai_settings: aiSettings,
+    ima_settings: imaSettings,
   });
 }
 
@@ -627,6 +636,7 @@ export async function POST(request: Request) {
       id,
       title,
     );
+    await syncTopicToIma(db, id, "created");
     return Response.json({ ok: true, id }, { status: 201 });
   }
 
@@ -670,6 +680,7 @@ export async function POST(request: Request) {
       "bulk",
       `${activeTopics.results.length} 个选题（历史内容任务保留）`,
     );
+    await Promise.all(activeTopics.results.map((topic) => syncTopicToIma(db, topic.id, "deleted")));
     return Response.json({ ok: true, archived: activeTopics.results.length });
   }
 

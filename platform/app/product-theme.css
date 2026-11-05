@@ -900,6 +900,7 @@ select:focus,
 }
 
 .topic-row.selected,
+.topic-row.focused,
 .sample-card.selected {
   border-color: #d9aeb1;
   background: #fdf6f6;
