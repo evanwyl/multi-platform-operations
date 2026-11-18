@@ -66,7 +66,23 @@ TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
 
 0. You just DO WHAT THE FUCK YOU WANT TO.
 
-## Chromium
+## 麦田运营监控参考
+
+- 项目：https://github.com/CzzzzzzJ/mdldm-maitian
+- 参考版本：0.4.0，55302b76bf4c23169a9e5b34c5c12f1f4b70fb3a
+- 用途：创作者后台作品卡片的只读数据提取、数字单位换算、按发布天龄采样与运营界面布局参考；未引入其 Chrome 商店扩展。
+
+MIT License
+
+Copyright (c) 2026 麦当 mdldm
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+## Chromium 运行时
 
 安装包内置 Playwright 使用的 Chromium，仅用于知乎账号的可见浏览器登录和后续发布适配。Chromium 采用 BSD 风格许可证，并包含各自使用不同开源许可证的第三方组件；完整许可证文件必须与浏览器运行时一同保留在 App 内。
 

@@ -151,11 +151,11 @@ test("distinguishes a WeChat draft from a real publication", async () => {
   assert.match(app, /drafted: "已入公众号草稿箱"/);
   assert.match(
     publish,
-    /isWechatArticle \? "drafted" : "published"/,
+    /isWechatArticle\s*\? "drafted"\s*: "published"/,
   );
   assert.match(
     publish,
-    /\["drafted", "scheduled"\]\.includes\(completedStatus\) \? null : publishedAt/,
+    /\["drafted", "scheduled"\]\.includes\(completedStatus\)\s*\? null\s*: publishedAt/,
   );
 });
 

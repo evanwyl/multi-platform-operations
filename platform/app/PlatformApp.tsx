@@ -16,7 +16,6 @@ import {
   CheckCircle,
   FileText,
   GearSix,
-  House,
   Lightbulb,
   ListMagnifyingGlass,
   PaperPlaneTilt,
@@ -26,6 +25,8 @@ import {
   UsersThree,
   type Icon,
 } from "@phosphor-icons/react";
+import OperationsCenter from "./OperationsCenter";
+import "./operations.css";
 
 type User = {
   id: string;
@@ -96,6 +97,34 @@ type Topic = {
   claim_owner_name?: string;
 };
 type ImagePrompt = { label: string; prompt: string };
+type RemixMode = "faithful" | "structure" | "theme";
+type RemixAnalysis = {
+  summary: string;
+  core_claims: string[];
+  logic_chain: string[];
+  fact_anchors: string[];
+  expression_hooks: string[];
+  risks: string[];
+};
+type RemixSource = {
+  feed_id: string;
+  title: string;
+  author_name: string;
+  source_url: string;
+  detail_text: string;
+  source_kind: "social" | "article";
+  liked_count: string;
+  collected_count: string;
+  comment_count: string;
+  shared_count: string;
+  heat_score: number;
+  published_at: string;
+  captured_at: string;
+  best_rank: number;
+  occurrence_count: number;
+  relevance_score: number;
+  trend_score: number;
+};
 type CreativeDraft = {
   title_options: string[];
   title: string;
@@ -103,8 +132,11 @@ type CreativeDraft = {
   tags: string[];
   image_prompts: ImagePrompt[];
   creative_note: string;
+  remix_mode?: RemixMode;
+  remix_analysis?: RemixAnalysis | null;
   video_options?: {
-    mode?: "publish" | "draft";
+    mode?: "publish" | "draft" | "manual";
+    schedule_at?: string;
   };
 };
 type MediaAsset = {
@@ -214,7 +246,7 @@ type Claim = {
     wechat_style?: Partial<WechatStyle>;
     media_assets?: MediaAsset[];
     creative?: {
-      video_options?: { mode?: "publish" | "draft" };
+      video_options?: { mode?: "publish" | "draft" | "manual"; schedule_at?: string };
     };
   } | null;
 };
@@ -234,6 +266,15 @@ type AISettings = {
   busy?: boolean;
   unavailable?: boolean;
 };
+type ImaSettings = {
+  configured: boolean;
+  clientId: string;
+  knowledgeBaseId: string;
+  knowledgeBaseName: string;
+  syncTopics: boolean;
+  syncPublished: boolean;
+  unavailable?: boolean;
+};
 type AppData = {
   user: User;
   accounts: Account[];
@@ -242,6 +283,7 @@ type AppData = {
   logs: Log[];
   users: User[];
   ai_settings: AISettings;
+  ima_settings: ImaSettings;
 };
 type TrendSettings = {
   account_id?: string;
@@ -357,6 +399,7 @@ type ArticleResearchData = {
   configured: boolean;
   endpoint: string;
   samples: ArticleSample[];
+  pending_samples: ArticleSample[];
   accounts: Account[];
 };
 type AuthData = { initialized: boolean; user: User | null };
@@ -419,13 +462,24 @@ const sampleCaptureOutcome: Record<string, string> = {
   duplicate: "已存在/重复",
 };
 
+class RequestError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "RequestError";
+    this.status = status;
+  }
+}
+
 async function jsonRequest<T = Record<string, unknown>>(
   url: string,
   options?: RequestInit,
 ): Promise<T> {
   const response = await fetch(url, options);
   const data = (await response.json()) as T & { error?: string };
-  if (!response.ok) throw new Error(data.error || "操作失败");
+  if (!response.ok)
+    throw new RequestError(data.error || "操作失败", response.status);
   return data as T;
 }
 
@@ -568,6 +622,8 @@ function blankCreative(claim?: Claim): CreativeDraft {
     tags: Array.isArray(saved?.tags) ? saved.tags : (claim?.tags ?? []),
     image_prompts: currentPrompts.slice(0, 6),
     creative_note: saved?.creative_note ?? "",
+    remix_mode: saved?.remix_mode ?? "faithful",
+    remix_analysis: saved?.remix_analysis ?? null,
     video_options: saved?.video_options ?? { mode: "publish" },
   };
   return isZhihuClaim(claim) || isVideoClaim(claim)
@@ -578,8 +634,9 @@ function blankCreative(claim?: Claim): CreativeDraft {
 export default function PlatformApp() {
   const [auth, setAuth] = useState<AuthData | null>(null);
   const [data, setData] = useState<AppData | null>(null);
-  const [view, setView] = useState("dashboard");
+  const [view, setView] = useState("operations");
   const [contentTargetId, setContentTargetId] = useState("");
+  const [focusedTopicId, setFocusedTopicId] = useState("");
   const [contentAccountId, setContentAccountId] = useState("");
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [scopePlatform, setScopePlatform] = useState<PlatformId | "">("");
@@ -587,7 +644,7 @@ export default function PlatformApp() {
   const [expandedPlatforms, setExpandedPlatforms] = useState<
     Record<PlatformId, boolean>
   >({
-    xiaohongshu: true,
+    xiaohongshu: false,
     zhihu: false,
     wechat: false,
     douyin: false,
@@ -711,7 +768,10 @@ export default function PlatformApp() {
     await loadAuth();
   }
 
-  async function action(payload: Record<string, unknown>, success: string) {
+  async function action(
+    payload: Record<string, unknown>,
+    success: string,
+  ): Promise<boolean> {
     setBusy(true);
     setMessage("");
     try {
@@ -722,8 +782,16 @@ export default function PlatformApp() {
       });
       await loadData();
       setMessage(success);
+      return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "操作失败");
+      if (error instanceof RequestError && error.status === 401) {
+        setData(null);
+        await loadAuth().catch(() => setAuth(null));
+        setMessage("登录已过期，请重新登录后继续");
+      } else {
+        setMessage(error instanceof Error ? error.message : "操作失败");
+      }
+      return false;
     } finally {
       setBusy(false);
     }
@@ -802,14 +870,26 @@ export default function PlatformApp() {
     target: string,
     platform: PlatformId,
     accountId = "",
+    topicId = "",
   ) {
     setScopePlatform(platform);
     setScopeAccountId(accountId);
     setExpandedPlatforms((current) => ({ ...current, [platform]: true }));
+    setFocusedTopicId(target === "topics" ? topicId : "");
     if (target === "content") {
       setContentAccountId(accountId);
       setContentTargetId("");
     }
+    setView(target);
+  }
+
+  function goFlowView(target: string) {
+    setScopePlatform("");
+    setScopeAccountId("");
+    setSelectedAccountId("");
+    setContentAccountId("");
+    setContentTargetId("");
+    setFocusedTopicId("");
     setView(target);
   }
 
@@ -859,30 +939,66 @@ export default function PlatformApp() {
           </div>
         </div>
         <nav aria-label="主要导航">
-          <div className="nav-group">
-            <span className="nav-group-label">总览</span>
-            <button
-              className={`nav-item ${view === "dashboard" ? "active" : ""}`}
-              aria-current={view === "dashboard" ? "page" : undefined}
-              onClick={() => {
-                setScopePlatform("");
-                setScopeAccountId("");
-                setSelectedAccountId("");
-                setView("dashboard");
-              }}
-            >
-              <span>
-                <House
-                  aria-hidden="true"
-                  size={18}
-                  weight={view === "dashboard" ? "fill" : "regular"}
-                />
-              </span>
-              工作台
-            </button>
+          <button className={`nav-item ${view === "operations" ? "active" : ""}`} aria-current={view === "operations" ? "page" : undefined} onClick={() => setView("operations")}><TrendUp size={18} aria-hidden="true" />运营总览</button>
+          <div className="nav-group operations-summary-nav">
+            <span className="nav-group-label">运营流程</span>
+            {[
+              [
+                "flow-topics",
+                Lightbulb,
+                "选题中心",
+                data.topics.length,
+              ],
+              [
+                "flow-content",
+                PenNib,
+                "内容创作",
+                data.claims.filter((claim) =>
+                  ["writing", "revision"].includes(claim.status),
+                ).length,
+              ],
+              [
+                "flow-review",
+                CheckCircle,
+                "审核中心",
+                data.claims.filter((claim) => claim.status === "review").length,
+              ],
+              [
+                "flow-publish",
+                PaperPlaneTilt,
+                "发布记录",
+                data.claims.filter(
+                  (claim) =>
+                    ["approved", "queued", "publishing", "failed"].includes(
+                      claim.status,
+                    ) && publishVisibleToCurrentUser(claim),
+                ).length,
+              ],
+            ].map(([id, FlowIcon, label, count]) => {
+              const active = view === id;
+              const IconComponent = FlowIcon as Icon;
+              return (
+                <button
+                  key={String(id)}
+                  className={`nav-item ${active ? "active" : ""}`}
+                  aria-current={active ? "page" : undefined}
+                  onClick={() => goFlowView(String(id))}
+                >
+                  <span>
+                    <IconComponent
+                      aria-hidden="true"
+                      size={18}
+                      weight={active ? "fill" : "regular"}
+                    />
+                  </span>
+                  {String(label)}
+                  {Number(count) > 0 ? <b>{Number(count)}</b> : null}
+                </button>
+              );
+            })}
           </div>
           <div className="nav-group platform-accordion-group">
-            <span className="nav-group-label">平台选择</span>
+            <span className="nav-group-label">账号与平台</span>
             {(
               [
                 "xiaohongshu",
@@ -1172,11 +1288,24 @@ export default function PlatformApp() {
           </div>
         ) : null}
         <div className="workspace-content">
+          {view === "operations" ? <OperationsCenter accounts={data.accounts} claims={data.claims} roles={data.user.roles} notify={setMessage} openClaim={(id) => { const claim = data.claims.find((item) => item.id === id); if (claim) openDashboardClaim(claim); }} /> : null}
           {view === "dashboard" && (
             <Dashboard
               data={data}
               setView={setView}
               openClaim={openDashboardClaim}
+            />
+          )}
+          {view.startsWith("flow-") && (
+            <OperationsSummary
+              key={view}
+              kind={view.slice(5) as OperationsSummaryKind}
+              data={data}
+              publishVisible={publishVisibleToCurrentUser}
+              openClaim={openDashboardClaim}
+              openPlatform={(platform, target) =>
+                goPlatformView(target.target, platform, "", target.topicId)
+              }
             />
           )}
           {view === "account-workspace" && (
@@ -1205,10 +1334,12 @@ export default function PlatformApp() {
           </div>
           {view === "topics" && (
             <Topics
+              key={scopePlatform || "xiaohongshu"}
               platform={scopePlatform || "xiaohongshu"}
               data={scopedData}
               action={action}
               busy={busy}
+              focusedTopicId={focusedTopicId}
             />
           )}
           <div
@@ -1280,6 +1411,312 @@ export default function PlatformApp() {
         </div>
       </section>
     </main>
+  );
+}
+
+type OperationsSummaryKind = "topics" | "content" | "review" | "publish";
+
+function Pagination({
+  page,
+  totalItems,
+  pageSize = 10,
+  onChange,
+}: {
+  page: number;
+  totalItems: number;
+  pageSize?: number;
+  onChange: (page: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  if (totalPages <= 1) return null;
+  const visiblePages = Array.from(
+    new Set(
+      [1, page - 1, page, page + 1, totalPages].filter(
+        (item) => item >= 1 && item <= totalPages,
+      ),
+    ),
+  );
+  return (
+    <nav className="content-pagination" aria-label="内容分页">
+      <button
+        type="button"
+        disabled={page <= 1}
+        onClick={() => onChange(page - 1)}
+      >
+        上一页
+      </button>
+      <div>
+        {visiblePages.map((item, index) => (
+          <span key={item}>
+            {index > 0 && item - visiblePages[index - 1] > 1 ? (
+              <i aria-hidden="true">…</i>
+            ) : null}
+            <button
+              type="button"
+              className={item === page ? "active" : ""}
+              aria-current={item === page ? "page" : undefined}
+              onClick={() => onChange(item)}
+            >
+              {item}
+            </button>
+          </span>
+        ))}
+      </div>
+      <button
+        type="button"
+        disabled={page >= totalPages}
+        onClick={() => onChange(page + 1)}
+      >
+        下一页
+      </button>
+    </nav>
+  );
+}
+
+function OperationsSummary({
+  kind,
+  data,
+  publishVisible,
+  openClaim,
+  openPlatform,
+}: {
+  kind: OperationsSummaryKind;
+  data: AppData;
+  publishVisible: (claim: Claim) => boolean;
+  openClaim: (claim: Claim) => void;
+  openPlatform: (
+    platform: PlatformId,
+    target: { target: string; topicId: string },
+  ) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [platformFilter, setPlatformFilter] = useState<PlatformId | "all">(
+    "all",
+  );
+  const [page, setPage] = useState(1);
+  const platformIds: PlatformId[] = [
+    "xiaohongshu",
+    "zhihu",
+    "wechat",
+    "douyin",
+    "wechat_channels",
+  ];
+  const copy = {
+    topics: {
+      kicker: "内容资产中心",
+      title: "所有选题，都有完整的来源记录",
+      intro: "统一检索选题、来源正文、认领状态和后续创作任务。",
+      empty: "当前没有选题记录。",
+    },
+    content: {
+      kicker: "今天 · 运营总览",
+      title: "先处理最重要的内容",
+      intro: "系统已结合团队任务、账号状态和发布进度整理了今天的优先事项。",
+      empty: "当前没有创作中或待修订的内容。",
+    },
+    review: {
+      kicker: "今天 · 审核总览",
+      title: "先处理最重要的审核任务",
+      intro: "跨平台查看待审核内容、负责人和风险提示，再进入对应平台完成审核。",
+      empty: "当前没有待审核内容。",
+    },
+    publish: {
+      kicker: "发布资产中心",
+      title: "所有发布，都有完整的流转记录",
+      intro: "统一查看待发布、发布中、失败和已完成记录，执行发布时仍进入对应平台。",
+      empty: "当前没有可查看的发布记录。",
+    },
+  }[kind];
+  const claimMatches = (claim: Claim) => {
+    if (kind === "content")
+      return ["writing", "revision"].includes(claim.status);
+    if (kind === "review") return claim.status === "review";
+    if (kind === "publish")
+      return (
+        [
+          "approved",
+          "queued",
+          "publishing",
+          "failed",
+          "published",
+          "drafted",
+          "scheduled",
+        ].includes(claim.status) && publishVisible(claim)
+      );
+    return false;
+  };
+  const visibleClaims = data.claims.filter(claimMatches);
+  const total = kind === "topics" ? data.topics.length : visibleClaims.length;
+  const platformCount = (platform: PlatformId) =>
+    kind === "topics"
+      ? data.topics.filter(
+          (topic) => (topic.platform || "xiaohongshu") === platform,
+        ).length
+      : visibleClaims.filter(
+          (claim) =>
+            (claim.account_platform || "xiaohongshu") === platform,
+        ).length;
+
+  const reviewCount = data.claims.filter(
+    (claim) => claim.status === "review",
+  ).length;
+  const creatingCount = data.claims.filter((claim) =>
+    ["writing", "revision"].includes(claim.status),
+  ).length;
+  const publishedCount = data.claims.filter((claim) =>
+    ["published", "drafted", "scheduled"].includes(claim.status),
+  ).length;
+  const pendingPublishCount = data.claims.filter(
+    (claim) =>
+      ["approved", "queued", "publishing", "failed"].includes(claim.status) &&
+      publishVisible(claim),
+  ).length;
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredTopics = data.topics.filter((topic) => {
+    const platform = (topic.platform || "xiaohongshu") as PlatformId;
+    return (
+      (platformFilter === "all" || platform === platformFilter) &&
+      (!normalizedQuery ||
+        `${topic.title} ${topic.creator_name} ${topic.source_author || ""}`
+          .toLowerCase()
+          .includes(normalizedQuery))
+    );
+  });
+  const filteredClaims = visibleClaims.filter((claim) => {
+    const platform = (claim.account_platform || "xiaohongshu") as PlatformId;
+    return (
+      (platformFilter === "all" || platform === platformFilter) &&
+      (!normalizedQuery ||
+        `${claim.title || claim.topic_title} ${claim.account_name} ${claim.owner_name}`
+          .toLowerCase()
+          .includes(normalizedQuery))
+    );
+  });
+  const overviewMode = kind === "content" || kind === "review";
+  const pageSize = 10;
+  const assetTotal =
+    kind === "topics" ? filteredTopics.length : filteredClaims.length;
+  const safePage = Math.min(page, Math.max(1, Math.ceil(assetTotal / pageSize)));
+  const pageStart = (safePage - 1) * pageSize;
+  const pagedTopics = filteredTopics.slice(pageStart, pageStart + pageSize);
+  const pagedClaims = filteredClaims.slice(pageStart, pageStart + pageSize);
+
+  return (
+    <div className={`page-stack operations-summary-page ops-${kind}`}>
+      <header className="ops-page-header">
+        <div>
+          <span className="section-kicker">{copy.kicker}</span>
+          <h1>{copy.title}</h1>
+          <p>{copy.intro}</p>
+        </div>
+      </header>
+
+      {overviewMode ? (
+        <>
+          <section className="ops-goal-hero">
+            <div>
+              <h2>从“操作页面”升级为“交付目标”</h2>
+              <p>
+                先确认目标，再进入对应平台完成创作、审核或发布；所有任务继续使用现有业务流程和权限。
+              </p>
+              <div className="ops-hero-chips">
+                <span><i />团队数据已同步</span>
+                <span>{data.accounts.length} 个账号</span>
+                <span>{data.claims.length} 条内容任务</span>
+              </div>
+            </div>
+            <div className="ops-health">
+              <strong>系统健康状态</strong>
+              <span>团队数据 <b>正常</b></span>
+              <span>账号资料 <b>正常</b></span>
+              <span>发布执行器 <b>{data.accounts.length} 个可用</b></span>
+              <span>最后同步 <b>刚刚</b></span>
+            </div>
+          </section>
+          <section className="ops-metrics" aria-label="运营数据概览">
+            {[
+              ["待认领选题", data.topics.filter((topic) => topic.status === "unclaimed").length, "等待负责人认领"],
+              ["创作进行中", creatingCount, "图文与视频任务"],
+              ["待审核内容", reviewCount, "需要审核员处理"],
+              ["累计已发布", publishedCount, `覆盖 ${platformIds.filter((id) => platformCount(id) > 0).length} 个平台`],
+            ].map(([label, value, note], index) => (
+              <article className="ops-metric" key={String(label)}>
+                <div><span>{String(label)}</span><i>{String(index + 1).padStart(2, "0")}</i></div>
+                <strong>{Number(value)}</strong>
+                <small>{String(note)}</small>
+              </article>
+            ))}
+          </section>
+          <section className="ops-overview-grid">
+            <article className="ops-task-card">
+              <div className="ops-card-head">
+                <div><h2>{kind === "review" ? "待处理审核任务" : "今天的内容执行计划"}</h2><p>每项任务都有平台、状态和负责人。</p></div>
+                <span>{visibleClaims.length} 项</span>
+              </div>
+              <div className="ops-task-list">
+                {(visibleClaims.length ? visibleClaims : data.claims).slice(0, 6).map((claim, index) => (
+                  <button type="button" key={claim.id} onClick={() => openClaim(claim)}>
+                    <i>{index + 1}</i>
+                    <span><strong>{claim.title || claim.topic_title}</strong><small>{platformLabel((claim.account_platform || "xiaohongshu") as PlatformId)} · {claim.account_name} · {claim.owner_name}</small></span>
+                    <b className={`status ${toneFor(claim.status)}`}>{claim.status_label}</b>
+                  </button>
+                ))}
+                {!data.claims.length ? <Empty title={copy.empty} text="新任务产生后会自动出现在这里。" /> : null}
+              </div>
+            </article>
+            <aside className="ops-discovery-card">
+              <div className="ops-card-head"><div><h2>运营发现</h2><p>来自现有内容和任务状态的提示。</p></div></div>
+              <div className="ops-signals">
+                <article><strong>{reviewCount ? `${reviewCount} 条内容等待审核` : "当前没有审核积压"}</strong><p>{reviewCount ? "建议优先处理等待时间最长的任务。" : "审核队列状态正常。"}</p></article>
+                <article><strong>{pendingPublishCount ? `${pendingPublishCount} 条内容准备发布` : "发布队列暂无待办"}</strong><p>正式发布仍需负责人或审核员确认。</p></article>
+                <article><strong>{data.topics.length} 个选题可供团队使用</strong><p>认领时选择平台、账号与内容类型。</p></article>
+              </div>
+            </aside>
+          </section>
+        </>
+      ) : (
+        <>
+          <section className="ops-asset-toolbar">
+            <label>
+              <ListMagnifyingGlass aria-hidden="true" size={18} />
+              <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="搜索选题、原文、草稿、发布记录或作品链接" />
+            </label>
+            <select aria-label="筛选平台" value={platformFilter} onChange={(event) => { setPlatformFilter(event.target.value as PlatformId | "all"); setPage(1); }}>
+              <option value="all">全部平台</option>
+              {platformIds.map((platform) => <option value={platform} key={platform}>{platformLabel(platform)}</option>)}
+            </select>
+          </section>
+          <div className="ops-asset-summary"><b>{kind === "topics" ? "选题资产库" : "发布记录库"}</b><span>统一保存完整流转信息，共 {total} 条。</span></div>
+          <section className="ops-asset-table">
+            <div className="ops-asset-head"><span>内容资产</span><span>流转平台</span><span>事实依据</span><span>当前阶段</span><span>负责人</span><span /></div>
+            {kind === "topics" ? pagedTopics.map((topic) => {
+              const platform = (topic.platform || "xiaohongshu") as PlatformId;
+              return <article className="ops-asset-row" key={topic.id}>
+                <div className="ops-asset-title"><span className={`platform-mini-mark ops-asset-platform-mark channel-${platform}`} aria-hidden="true">{platform === "xiaohongshu" ? "小" : platform === "zhihu" ? "知" : platform === "wechat" ? "微" : platform === "douyin" ? "抖" : "视"}</span><span><strong>{topic.title}</strong><small>{topic.source_author || topic.creator_name} · {topic.source_detail_verified ? "正文已核验" : "来源已记录"}</small></span></div>
+                <span className="ops-platform-tag">{platformLabel(platform)}</span>
+                <b className="ops-truth">{topic.source_detail_verified ? "正文完整 · 已核验" : "来源可追溯"}</b>
+                <span className="status orange">{topic.claim_status ? "已认领" : "待认领"}</span>
+                <span>{topic.claim_owner_name || "未分配"}</span>
+                <button onClick={() => openPlatform(platform, { target: "topics", topicId: topic.id })}>查看链路</button>
+              </article>;
+            }) : pagedClaims.map((claim) => {
+              const platform = (claim.account_platform || "xiaohongshu") as PlatformId;
+              return <article className="ops-asset-row" key={claim.id}>
+                <div className="ops-asset-title"><span className={`platform-mini-mark ops-asset-platform-mark channel-${platform}`} aria-hidden="true">{platform === "xiaohongshu" ? "小" : platform === "zhihu" ? "知" : platform === "wechat" ? "微" : platform === "douyin" ? "抖" : "视"}</span><span><strong>{claim.title || claim.topic_title}</strong><small>{claim.account_name} · {contentTypeLabel(claim)}</small></span></div>
+                <span className="ops-platform-tag">{platformLabel(platform)}</span>
+                <b className="ops-truth">{claim.publish_snapshot ? "审核快照 · 已冻结" : "内容版本可追溯"}</b>
+                <span className={`status ${toneFor(claim.status)}`}>{claim.status_label}</span>
+                <span>{claim.owner_name}</span>
+                <button onClick={() => openClaim(claim)}>查看链路</button>
+              </article>;
+            })}
+            {!(kind === "topics" ? filteredTopics.length : filteredClaims.length) ? <Empty title={copy.empty} text="调整筛选条件，或进入对应平台创建新任务。" /> : null}
+            <Pagination page={safePage} totalItems={assetTotal} pageSize={pageSize} onChange={setPage} />
+            <footer><span>团队内容记录 · 本机安全存储</span><span>第 {safePage} 页 · 每页 {pageSize} 条 · 共 {assetTotal} 条</span></footer>
+          </section>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1847,6 +2284,7 @@ function ArticleResearch({
   const [topicTitle, setTopicTitle] = useState("");
   const [selectedArticles, setSelectedArticles] = useState<string[]>([]);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [pendingPage, setPendingPage] = useState(1);
 
   function toggleDomain(
     domain: string,
@@ -1889,6 +2327,8 @@ function ArticleResearch({
         candidates: number;
         rejected_pages: number;
         rejected_by_time: number;
+        body_failures?: number;
+        verification_required?: number;
         errors?: string[];
       }>("/api/article-research", {
         method: "POST",
@@ -1903,12 +2343,46 @@ function ArticleResearch({
       });
       await load();
       notify(
-        `搜索候选 ${result.candidates} 条，排除非文章 ${result.rejected_pages} 条、时间不符或日期缺失 ${result.rejected_by_time} 条，最终返回 ${result.discovered} 篇正文${result.errors?.length ? `；${result.errors.length} 个关键词搜索异常` : ""}`,
+        `搜索候选 ${result.candidates} 条，正文成功 ${result.discovered} 篇，等待本地微信读取 ${result.verification_required || 0} 篇${result.errors?.length ? `；${result.errors.length} 个关键词搜索异常` : ""}`,
       );
     } catch (error) {
       notify(error instanceof Error ? error.message : "文章搜索失败");
     } finally {
       setSearching(false);
+    }
+  }
+
+  async function batchWechatReader(samples: ArticleSample[]) {
+    if (!samples.length) return;
+    setWorkingId("reader-batch");
+    notify(
+      `正在自动读取 ${samples.length} 篇公众号正文；如弹出微信验证，只需在窗口中完成验证，系统会自动继续`,
+    );
+    try {
+      const result = await jsonRequest<{
+        completed: number;
+        requested: number;
+        skipped: number;
+        verification_required: boolean;
+      }>("/api/article-research", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "capture_wechat_reader_batch",
+          platform: "wechat",
+          sample_ids: samples.map((sample) => sample.id),
+        }),
+      });
+      await load();
+      notify(
+        result.verification_required
+          ? `本批成功读取 ${result.completed} 篇、自动跳过 ${result.skipped || 0} 篇，仍有文章需要微信验证；完成验证后可继续`
+          : `本批处理完成：成功读取 ${result.completed} 篇，自动跳过 ${result.skipped || 0} 篇失效文章`,
+      );
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "批量读取公众号正文失败");
+    } finally {
+      setWorkingId("");
     }
   }
 
@@ -1980,6 +2454,12 @@ function ArticleResearch({
       </div>
     );
   const visible = data.samples.filter((sample) => sample.status !== "used");
+  const pendingPageCount = Math.max(1, Math.ceil(data.pending_samples.length / 10));
+  const safePendingPage = Math.min(pendingPage, pendingPageCount);
+  const visiblePending = data.pending_samples.slice(
+    (safePendingPage - 1) * 10,
+    safePendingPage * 10,
+  );
   const allVisibleSelected =
     Boolean(visible.length) &&
     visible.every((sample) => selectedArticles.includes(sample.id));
@@ -2006,8 +2486,12 @@ function ArticleResearch({
             </strong>
             <span>
               {data.configured
-                ? "可搜索全网文章并抓取正文"
-                : "请检查本机搜索服务"}
+                ? platform === "wechat"
+                  ? "可搜索公众号文章并抓取正文"
+                  : "可搜索全网文章并抓取正文"
+                : platform === "wechat"
+                  ? "请检查搜狗微信搜索网络"
+                  : "请检查本机搜索服务"}
             </span>
           </div>
         </div>
@@ -2093,6 +2577,49 @@ function ArticleResearch({
           </small>
         </div>
       </section>
+      {platform === "wechat" && data.pending_samples.length ? (
+        <section className="panel article-results article-reader-queue">
+          <div className="panel-head">
+            <div>
+              <h2>待微信读取</h2>
+              <p>
+                {data.pending_samples.length} 篇文章触发了微信访问验证；完成本地验证后才会进入选题库。
+              </p>
+            </div>
+            <div className="article-reader-batch-actions">
+              <button
+                className="primary"
+                disabled={Boolean(workingId) || !visiblePending.length}
+                onClick={() => batchWechatReader(visiblePending)}
+              >
+                {workingId === "reader-batch"
+                  ? "正在自动读取…"
+                  : `自动读取本页 ${visiblePending.length} 篇`}
+              </button>
+            </div>
+          </div>
+          <div className="article-reader-list">
+            {visiblePending.map((sample) => (
+              <article key={sample.id}>
+                <div>
+                  <strong>{sample.title}</strong>
+                  <span>
+                    {sample.author_name || "公众号文章"} · {sample.detail_error}
+                  </span>
+                </div>
+                <a href={sample.source_url} target="_blank" rel="noreferrer">
+                  查看链接
+                </a>
+              </article>
+            ))}
+          </div>
+          <Pagination
+            page={safePendingPage}
+            totalItems={data.pending_samples.length}
+            onChange={setPendingPage}
+          />
+        </section>
+      ) : null}
       <section className="panel article-results">
         <div className="panel-head">
           <div>
@@ -2370,11 +2897,13 @@ function Trends({
     const result = (await jsonRequest("/api/trends")) as TrendData;
     setData(result);
     setTargetAccountId(
-      (current) =>
-        current ||
-        result.settings?.target_account_id ||
-        result.accounts[0]?.id ||
-        "",
+      (current) => {
+        const candidates = result.accounts.map((account) => account.id);
+        if (candidates.includes(current)) return current;
+        if (result.settings?.target_account_id && candidates.includes(result.settings.target_account_id))
+          return result.settings.target_account_id;
+        return result.accounts[0]?.id || "";
+      },
     );
   }, []);
   useEffect(() => {
@@ -2382,11 +2911,13 @@ function Trends({
       .then((result) => {
         setData(result);
         setTargetAccountId(
-          (current) =>
-            current ||
-            result.settings?.target_account_id ||
-            result.accounts[0]?.id ||
-            "",
+          (current) => {
+            const candidates = result.accounts.map((account) => account.id);
+            if (candidates.includes(current)) return current;
+            if (result.settings?.target_account_id && candidates.includes(result.settings.target_account_id))
+              return result.settings.target_account_id;
+            return result.accounts[0]?.id || "";
+          },
         );
       })
       .catch((error) =>
@@ -3488,11 +4019,16 @@ function Topics({
   data,
   action,
   busy,
+  focusedTopicId,
 }: {
   platform: PlatformId;
   data: AppData;
-  action: (payload: Record<string, unknown>, success: string) => void;
+  action: (
+    payload: Record<string, unknown>,
+    success: string,
+  ) => Promise<boolean>;
   busy: boolean;
+  focusedTopicId?: string;
 }) {
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
@@ -3500,9 +4036,26 @@ function Topics({
   const [accountId, setAccountId] = useState(data.accounts[0]?.id ?? "");
   const [angle, setAngle] = useState("");
   const [contentType, setContentType] = useState(defaultContentType(platform));
-  const [topicFilter, setTopicFilter] = useState("unclaimed");
+  const [topicFilter, setTopicFilter] = useState("all");
+  const [topicPage, setTopicPage] = useState(() => {
+    const focusedIndex = focusedTopicId
+      ? data.topics.findIndex((topic) => topic.id === focusedTopicId)
+      : -1;
+    return focusedIndex >= 0 ? Math.floor(focusedIndex / 10) + 1 : 1;
+  });
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [confirmingTopicDelete, setConfirmingTopicDelete] = useState(false);
+  useEffect(() => {
+    if (!focusedTopicId) return;
+    const topicIndex = data.topics.findIndex((topic) => topic.id === focusedTopicId);
+    if (topicIndex < 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        document.getElementById(`topic-${focusedTopicId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusedTopicId, data.topics]);
   const canOperate = data.user.roles.some((role) =>
     ["admin", "operator"].includes(role),
   );
@@ -3544,9 +4097,18 @@ function Topics({
   const activeGroup =
     topicGroups.find((group) => group.id === topicFilter) || topicGroups[0];
   const visibleTopics = data.topics.filter(activeGroup.matches);
+  const topicPageSize = 10;
+  const safeTopicPage = Math.min(
+    topicPage,
+    Math.max(1, Math.ceil(visibleTopics.length / topicPageSize)),
+  );
+  const pagedVisibleTopics = visibleTopics.slice(
+    (safeTopicPage - 1) * topicPageSize,
+    safeTopicPage * topicPageSize,
+  );
   const allVisibleTopicsSelected =
-    Boolean(visibleTopics.length) &&
-    visibleTopics.every((topic) => selectedTopics.includes(topic.id));
+    Boolean(pagedVisibleTopics.length) &&
+    pagedVisibleTopics.every((topic) => selectedTopics.includes(topic.id));
   const isZhihu = platform === "zhihu";
   const topicCopy =
     platform === "zhihu"
@@ -3717,9 +4279,9 @@ function Topics({
             <h2>{topicCopy.newTitle}</h2>
           </div>
           <form
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
-              action(
+              const created = await action(
                 {
                   action: "create_topic",
                   title,
@@ -3730,8 +4292,10 @@ function Topics({
                 },
                 `${platformLabel(platform)}选题已创建`,
               );
-              setTitle("");
-              setUrl("");
+              if (created) {
+                setTitle("");
+                setUrl("");
+              }
             }}
           >
             <input
@@ -3768,7 +4332,10 @@ function Topics({
               <button
                 key={group.id}
                 className={topicFilter === group.id ? "active" : ""}
-                onClick={() => setTopicFilter(group.id)}
+                onClick={() => {
+                  setTopicFilter(group.id);
+                  setTopicPage(1);
+                }}
               >
                 {group.label}
                 <span>{count}</span>
@@ -3787,18 +4354,20 @@ function Topics({
                     allVisibleTopicsSelected
                       ? selectedTopics.filter(
                           (id) =>
-                            !visibleTopics.some((topic) => topic.id === id),
+                            !pagedVisibleTopics.some(
+                              (topic) => topic.id === id,
+                            ),
                         )
                       : Array.from(
                           new Set([
                             ...selectedTopics,
-                            ...visibleTopics.map((topic) => topic.id),
+                            ...pagedVisibleTopics.map((topic) => topic.id),
                           ]),
                         ),
                   )
                 }
               />
-              全选当前分类
+              全选当前页
             </label>
             <span>已选择 {selectedTopics.length} 个选题</span>
             <button
@@ -3822,9 +4391,10 @@ function Topics({
         ) : null}
         {visibleTopics.length ? (
           <div className="data-list topic-cards">
-            {visibleTopics.map((topic) => (
+            {pagedVisibleTopics.map((topic) => (
               <article
-                className={`topic-row ${topic.brief ? "analyzed" : ""} ${selectedTopics.includes(topic.id) ? "selected" : ""}`}
+                id={`topic-${topic.id}`}
+                className={`topic-row ${topic.brief ? "analyzed" : ""} ${selectedTopics.includes(topic.id) ? "selected" : ""} ${focusedTopicId === topic.id ? "focused" : ""}`}
                 key={topic.id}
               >
                 <label
@@ -3894,6 +4464,15 @@ function Topics({
                       <strong>{topic.claim_owner_name || "未认领"}</strong>
                     </div>
                   </div>
+                  {topic.note_id ? (
+                    <div className="topic-post-metrics" aria-label="来源帖子数据">
+                      <span><b>{topic.liked_count || "0"}</b>点赞</span>
+                      <span><b>{topic.collected_count || "0"}</b>收藏</span>
+                      <span><b>{topic.comment_count || "0"}</b>评论</span>
+                      <span><b>{topic.heat_score || 0}</b>热度分</span>
+                      <span><b>{topic.note_published_at ? dateTime(topic.note_published_at) : "未提供"}</b>发布时间</span>
+                    </div>
+                  ) : null}
                   <div className="topic-breakdown">
                     <div className="topic-summary">
                       <span>{isZhihu ? "主题说明" : "内容摘要"}</span>
@@ -3978,6 +4557,12 @@ function Topics({
                 ) : null}
               </article>
             ))}
+            <Pagination
+              page={safeTopicPage}
+              totalItems={visibleTopics.length}
+              pageSize={topicPageSize}
+              onChange={setTopicPage}
+            />
           </div>
         ) : (
           <Empty
@@ -4181,7 +4766,10 @@ function Content({
   initialAccountId,
 }: {
   data: AppData;
-  action: (payload: Record<string, unknown>, success: string) => void;
+  action: (
+    payload: Record<string, unknown>,
+    success: string,
+  ) => Promise<boolean>;
   busy: boolean;
   reload: () => Promise<void>;
   notify: (message: string) => void;
@@ -4216,6 +4804,14 @@ function Content({
   const [instruction, setInstruction] = useState("");
   const [creating, setCreating] = useState(false);
   const [creationSeconds, setCreationSeconds] = useState(0);
+  const [remixStage, setRemixStage] = useState<
+    "source" | "analysis" | "workbench"
+  >("source");
+  const [remixSources, setRemixSources] = useState<RemixSource[]>([]);
+  const [loadingRemixContext, setLoadingRemixContext] = useState(
+    Boolean(initialTarget && !isVideoClaim(initialTarget)),
+  );
+  const [analyzingRemix, setAnalyzingRemix] = useState(false);
   const [saving, setSaving] = useState(false);
   const [coverGenerating, setCoverGenerating] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
@@ -4251,6 +4847,9 @@ function Content({
     setCreative(blankCreative(claim));
     setVersions([]);
     setShowVersions(false);
+    setRemixSources([]);
+    setLoadingRemixContext(!isVideoClaim(claim));
+    setRemixStage(isVideoClaim(claim) ? "workbench" : "source");
     setContentLevel("editor");
   }
 
@@ -4262,8 +4861,33 @@ function Content({
     setCreative(blankCreative());
     setVersions([]);
     setShowVersions(false);
+    setRemixSources([]);
+    setLoadingRemixContext(false);
+    setRemixStage("source");
     setContentLevel("list");
   }
+
+  useEffect(() => {
+    if (!selected?.id || isVideoClaim(selected)) return;
+    let cancelled = false;
+    void jsonRequest<{
+      sources?: RemixSource[];
+    }>("/api/creation?id=" + encodeURIComponent(selected.id))
+      .then((result) => {
+        if (cancelled) return;
+        setRemixSources(Array.isArray(result.sources) ? result.sources : []);
+      })
+      .catch((error) => {
+        if (!cancelled)
+          notify(error instanceof Error ? error.message : "无法读取二创来源");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingRemixContext(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [notify, selected]);
 
   async function creationRequest(
     payload: Record<string, unknown>,
@@ -4273,10 +4897,19 @@ function Content({
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: selected?.id, ...payload }),
-    })) as { creative: CreativeDraft; version: number };
+    })) as {
+      creative: CreativeDraft;
+      version: number;
+      sources?: RemixSource[];
+    };
     setCreative(result.creative);
+    if (result.sources) setRemixSources(result.sources);
     await reload();
-    notify(success + "，当前为 v" + result.version);
+    notify(
+      result.version
+        ? `${success}，当前为 v${result.version}`
+        : `${success}，拆解结果已保存`,
+    );
     return result;
   }
 
@@ -4295,7 +4928,11 @@ function Content({
     );
     try {
       await creationRequest(
-        { action: "generate", instruction },
+        {
+          action: "generate",
+          instruction,
+          remix_mode: creative.remix_mode || "faithful",
+        },
         zhihuArticle
           ? "知乎专栏文章已生成"
           : wechatArticle
@@ -4310,13 +4947,50 @@ function Content({
     }
   }
 
+  async function analyzeForRemix() {
+    if (!selected || !editable || !remixSources.length) return;
+    setAnalyzingRemix(true);
+    try {
+      await creationRequest(
+        { action: "analyze_remix" },
+        "来源正文已完成拆解",
+      );
+      setRemixStage("analysis");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "AI 拆解失败");
+    } finally {
+      setAnalyzingRemix(false);
+    }
+  }
+
   async function generateWechatCoverPrompt() {
-    if (!selected || !editable || !creative.title || !creative.body) return;
+    if (
+      !selected ||
+      !canOperate ||
+      !creative.title ||
+      !creative.body ||
+      !["writing", "revision", "review"].includes(selected.status)
+    )
+      return;
+    const reopenReview = selected.status === "review";
+    if (
+      reopenReview &&
+      !window.confirm(
+        "这篇内容已经提交审核。继续生成封面提示词会撤回本次审核，生成后需要重新选择排版并提交审核。是否继续？",
+      )
+    )
+      return;
     setCoverGenerating(true);
     try {
       await creationRequest(
-        { action: "generate_cover_prompt", creative },
-        "公众号封面提示词已生成",
+        {
+          action: "generate_cover_prompt",
+          creative,
+          reopen_review: reopenReview,
+        },
+        reopenReview
+          ? "已撤回审核并生成公众号封面提示词"
+          : "公众号封面提示词已生成",
       );
     } catch (error) {
       notify(
@@ -4858,6 +5532,130 @@ function Content({
             </div>
           ) : null}
           {!videoContent ? (
+            <nav className="remix-flow" aria-label="AI 二创流程">
+              {[
+                ["source", "01", "原始内容", remixSources.length ? `${remixSources.length} 条来源` : "等待来源"],
+                ["analysis", "02", "AI 拆解", creative.remix_analysis ? "已完成" : "待拆解"],
+                ["workbench", "03", "二创工作台", creative.body ? "已有草稿" : "待创作"],
+              ].map(([stage, index, label, state]) => (
+                <button
+                  type="button"
+                  key={stage}
+                  className={remixStage === stage ? "active" : ""}
+                  onClick={() => setRemixStage(stage as typeof remixStage)}
+                >
+                  <b>{index}</b>
+                  <span><strong>{label}</strong><small>{state}</small></span>
+                </button>
+              ))}
+            </nav>
+          ) : null}
+          {!videoContent && remixStage === "source" ? (
+            <section className="panel remix-source-stage">
+              <header className="remix-stage-head">
+                <div>
+                  <span className="section-kicker">第一步 · 确认创作依据</span>
+                  <h2>先读原文，再决定如何二创</h2>
+                  <p>这里只展示实际抓取成功的正文。没有正文时，平台不会假装基于原文改写。</p>
+                </div>
+                {remixSources.length ? (
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={!editable || analyzingRemix}
+                    onClick={analyzeForRemix}
+                  >
+                    {analyzingRemix ? "正在拆解…" : creative.remix_analysis ? "重新拆解原文" : "AI 拆解原文"}
+                  </button>
+                ) : null}
+              </header>
+              {loadingRemixContext ? (
+                <div className="remix-loading" role="status">正在读取来源正文…</div>
+              ) : remixSources.length ? (
+                <div className="remix-source-list">
+                  {remixSources.map((source, index) => (
+                    <article key={source.feed_id} className={index === 0 ? "primary-source" : ""}>
+                      <div className="remix-source-meta">
+                        <span>{index === 0 ? "主稿" : "核验来源"}</span>
+                        <small>{source.author_name || "来源作者未记录"}</small>
+                        {source.source_url ? <a href={source.source_url} target="_blank" rel="noreferrer">查看原文 ↗</a> : null}
+                      </div>
+                      <h3>{source.title || selected.topic_title}</h3>
+                      <div className="remix-source-metrics" aria-label="来源内容数据">
+                        {source.source_kind === "social" ? (
+                          <>
+                            <span><b>{source.liked_count || "0"}</b>点赞</span>
+                            <span><b>{source.collected_count || "0"}</b>收藏</span>
+                            <span><b>{source.comment_count || "0"}</b>评论</span>
+                            {source.shared_count ? <span><b>{source.shared_count}</b>分享</span> : null}
+                            <span><b>{source.heat_score || 0}</b>热度分</span>
+                          </>
+                        ) : (
+                          <>
+                            <span><b>{source.best_rank || "—"}</b>搜索排名</span>
+                            <span><b>{source.occurrence_count || 1}</b>检索出现</span>
+                            <span><b>{source.relevance_score || 0}</b>相关度</span>
+                            <span><b>{source.trend_score || 0}</b>趋势分</span>
+                          </>
+                        )}
+                        <span><b>{source.published_at ? dateTime(source.published_at) : "未提供"}</b>发布时间</span>
+                        <span><b>{source.captured_at ? dateTime(source.captured_at) : "未记录"}</b>抓取时间</span>
+                      </div>
+                      <div className="remix-source-copy">{source.detail_text}</div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="remix-empty-source">
+                  <strong>当前选题没有抓取成功的正文</strong>
+                  <p>可以返回选题中心补充来源；也可以进入工作台做无来源原创，但系统不会把它标记成原文改写。</p>
+                  <button type="button" className="outline" onClick={() => setRemixStage("workbench")}>进入原创工作台</button>
+                </div>
+              )}
+            </section>
+          ) : null}
+          {!videoContent && remixStage === "analysis" ? (
+            <section className="panel remix-analysis-stage">
+              <header className="remix-stage-head">
+                <div>
+                  <span className="section-kicker">第二步 · 看清结构与边界</span>
+                  <h2>AI 拆解不是改稿，而是建立二创依据</h2>
+                  <p>核心观点、逻辑顺序和事实锚点用于防止二创时虚构内容。</p>
+                </div>
+                <div className="remix-stage-actions">
+                  {remixSources.length ? <button type="button" className="outline" disabled={!editable || analyzingRemix} onClick={analyzeForRemix}>{analyzingRemix ? "拆解中…" : "重新拆解"}</button> : null}
+                  <button type="button" className="primary" onClick={() => setRemixStage("workbench")}>进入二创工作台</button>
+                </div>
+              </header>
+              {creative.remix_analysis ? (
+                <div className="remix-analysis-grid">
+                  <article className="remix-analysis-summary">
+                    <span>内容摘要</span>
+                    <p>{creative.remix_analysis.summary}</p>
+                  </article>
+                  {[
+                    ["核心观点", creative.remix_analysis.core_claims],
+                    ["原文逻辑", creative.remix_analysis.logic_chain],
+                    ["事实锚点", creative.remix_analysis.fact_anchors],
+                    ["表达钩子", creative.remix_analysis.expression_hooks],
+                    ["改写风险", creative.remix_analysis.risks],
+                  ].map(([label, items]) => (
+                    <article key={label as string}>
+                      <span>{label as string}</span>
+                      {(items as string[]).length ? <ol>{(items as string[]).map((item, index) => <li key={`${label}-${index}`}>{item}</li>)}</ol> : <p>原文未发现明确内容</p>}
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="remix-empty-source">
+                  <strong>还没有拆解结果</strong>
+                  <p>{remixSources.length ? "点击“AI 拆解原文”，生成可追溯的二创依据。" : "当前没有来源正文，可以直接进入原创工作台。"}</p>
+                  {remixSources.length ? <button type="button" className="primary" disabled={!editable || analyzingRemix} onClick={analyzeForRemix}>{analyzingRemix ? "正在拆解…" : "AI 拆解原文"}</button> : null}
+                </div>
+              )}
+            </section>
+          ) : null}
+          {!videoContent && remixStage === "workbench" ? (
             <section className="creative-command">
               <div>
                 <span className="section-kicker">
@@ -4875,6 +5673,26 @@ function Content({
                       : `由${selectedPlatformName}文章编辑完成长文初稿，再经过 Humanizer 去除模板化表达。`
                     : `由${selectedPlatformName}内容编辑生成标题、正文、标签和整篇配图提示词；切换功能页不会中断。`}
                 </p>
+              </div>
+              <div className="remix-mode-picker" aria-label="选择二创模式">
+                {remixSources.length ? (
+                  [
+                    ["faithful", "保真换话术", "不改逻辑与事实，只改变平台话术"],
+                    ["structure", "结构复用", "沿用推进结构，重新组织表达"],
+                    ["theme", "主题再创作", "围绕同一主题换角度，事实仍需可追溯"],
+                  ].map(([mode, label, note]) => (
+                    <button
+                      type="button"
+                      key={mode}
+                      className={(creative.remix_mode || "faithful") === mode ? "active" : ""}
+                      onClick={() => setCreative({ ...creative, remix_mode: mode as RemixMode })}
+                    >
+                      <strong>{label}</strong><span>{note}</span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="remix-original-mode"><strong>无来源原创</strong><span>只依据选题信息创作，不假装引用原文事实</span></div>
+                )}
               </div>
               <div className="creative-command-row">
                 <input
@@ -4925,7 +5743,7 @@ function Content({
                 </div>
               ) : null}
             </section>
-          ) : (
+          ) : videoContent ? (
             <section className="creative-command video-publish-intro">
               <div>
                 <span className="section-kicker">
@@ -4955,9 +5773,9 @@ function Content({
                 </div>
               </div>
             </section>
-          )}
+          ) : null}
 
-          <section
+          {remixStage === "workbench" || videoContent ? <section
             className={`panel creative-editor ${
               imageContent || videoContent ? "creator-studio-editor" : ""
             }`}
@@ -5221,13 +6039,15 @@ function Content({
                           setCreative({
                             ...creative,
                             video_options: {
-                              mode: event.target.value as "publish" | "draft",
+                              ...creative.video_options,
+                              mode: event.target.value as "publish" | "draft" | "manual",
                             },
                           })
                         }
                       >
                         <option value="publish">审核后直接发布</option>
                         <option value="draft">保存到平台草稿</option>
+                        <option value="manual">自动填写，最终由我确认发布</option>
                       </select>
                     </label>
                   ) : (
@@ -5236,6 +6056,7 @@ function Content({
                       <span>当前小红书 MCP 视频通道不提供保存草稿模式。</span>
                     </div>
                   )}
+                  {selected.account_platform === "douyin" || selected.account_platform === "wechat_channels" ? <label>定时发布时间（选填）<input type="datetime-local" value={(creative.video_options?.schedule_at || "").slice(0, 16)} disabled={!editable || creative.video_options?.mode === "draft"} onChange={(event) => setCreative({ ...creative, video_options: { ...creative.video_options, schedule_at: event.target.value ? `${event.target.value}:00+08:00` : "" } })} /><small>审核通过并执行发布后，由平台按中国标准时间发布。</small></label> : null}
                 </section>
               ) : !longArticle ? (
                 <section className="review-image-uploader creator-media-workbench">
@@ -5376,10 +6197,10 @@ function Content({
                       : "保存图文并提交审核"}
               </button>
             </div>
-          </section>
+          </section> : null}
         </section>
 
-        {!longArticle && !videoContent ? (
+        {!longArticle && !videoContent && remixStage === "workbench" ? (
           <aside className="panel visual-builder post-image-prompts">
             <div className="visual-builder-head">
               <div>
@@ -5397,17 +6218,23 @@ function Content({
                   <button
                     className="primary"
                     disabled={
-                      !editable ||
+                      !canOperate ||
                       creating ||
                       saving ||
                       coverGenerating ||
                       !creative.title ||
-                      !creative.body
+                      !creative.body ||
+                      !selected ||
+                      !["writing", "revision", "review"].includes(
+                        selected.status,
+                      )
                     }
                     onClick={generateWechatCoverPrompt}
                   >
                     {coverGenerating
                       ? "正在生成封面…"
+                      : selected?.status === "review"
+                        ? "撤回审核并生成提示词"
                       : creative.image_prompts.some((item) =>
                             /封面|主视觉/.test(item.label),
                           )
@@ -5425,7 +6252,7 @@ function Content({
             <p className="post-prompts-intro">
               AI 根据完整标题和正文推荐一组独立成品图。
               {wechatArticle
-                ? "第一张用于公众号封面，其余图片可插入正文；每条提示词都描述一张完整成品图。"
+                ? "这里生成的是可交给图片模型使用的制作提示词，不会直接生成图片；生成成品图后请在左侧“文章素材”上传，首张作为封面。"
                 : "每条提示词都描述整张图片，不是背景图、卡片模板或留字底图。"}
             </p>
             {creative.image_prompts.length ? (
@@ -5657,11 +6484,15 @@ function Review({
   notify,
 }: {
   data: AppData;
-  action: (payload: Record<string, unknown>, success: string) => void;
+  action: (
+    payload: Record<string, unknown>,
+    success: string,
+  ) => Promise<boolean>;
   busy: boolean;
   notify: (message: string) => void;
 }) {
   const [reviewFilter, setReviewFilter] = useState("pending");
+  const [reviewPage, setReviewPage] = useState(1);
   const [comments, setComments] = useState<Record<string, string>>({});
   const [wechatPreview, setWechatPreview] = useState<{
     claim: Claim;
@@ -5717,6 +6548,15 @@ function Review({
     reviewGroups.find((group) => group.id === reviewFilter) || reviewGroups[0];
   const reviewHistory = data.claims.filter(reviewGroups[0].matches);
   const items = reviewHistory.filter(activeGroup.matches);
+  const reviewPageSize = 10;
+  const safeReviewPage = Math.min(
+    reviewPage,
+    Math.max(1, Math.ceil(items.length / reviewPageSize)),
+  );
+  const pagedReviewItems = items.slice(
+    (safeReviewPage - 1) * reviewPageSize,
+    safeReviewPage * reviewPageSize,
+  );
 
   return (
     <section className="panel data-panel">
@@ -5739,7 +6579,10 @@ function Review({
             <button
               key={group.id}
               className={reviewFilter === group.id ? "active" : ""}
-              onClick={() => setReviewFilter(group.id)}
+              onClick={() => {
+                setReviewFilter(group.id);
+                setReviewPage(1);
+              }}
             >
               {group.label}
               <span>{count}</span>
@@ -5749,7 +6592,7 @@ function Review({
       </div>
       {items.length ? (
         <div className="review-list">
-          {items.map((claim) => (
+          {pagedReviewItems.map((claim) => (
             <article className="review-card" key={claim.id}>
               <div className="review-card-head">
                 <span
@@ -5898,6 +6741,12 @@ function Review({
               )}
             </article>
           ))}
+          <Pagination
+            page={safeReviewPage}
+            totalItems={items.length}
+            pageSize={reviewPageSize}
+            onChange={setReviewPage}
+          />
         </div>
       ) : (
         <Empty
@@ -5961,6 +6810,7 @@ function Publish({
   notify: (message: string) => void;
 }) {
   const [filter, setFilter] = useState<"pending" | "published">("pending");
+  const [publishPage, setPublishPage] = useState(1);
   const [working, setWorking] = useState("");
   const [viewing, setViewing] = useState<Claim | null>(null);
   const [layoutPreview, setLayoutPreview] = useState<{
@@ -5983,6 +6833,15 @@ function Publish({
     ["published", "drafted", "scheduled"].includes(claim.status),
   );
   const items = filter === "pending" ? pending : published;
+  const publishPageSize = 10;
+  const safePublishPage = Math.min(
+    publishPage,
+    Math.max(1, Math.ceil(items.length / publishPageSize)),
+  );
+  const pagedPublishItems = items.slice(
+    (safePublishPage - 1) * publishPageSize,
+    safePublishPage * publishPageSize,
+  );
 
   async function previewWechatLayout(claim: Claim) {
     setWorking(claim.id);
@@ -6032,7 +6891,9 @@ function Publish({
       });
       await reload();
       notify(
-        isWechatClaim(claim)
+        result.status === "awaiting_user"
+          ? "审核内容已填写，请在浏览器中确认发布；随后到运营总览的内容档案核验结果"
+          : isWechatClaim(claim)
           ? "内容已写入公众号草稿箱并回读核验"
           : result.status === "drafted"
             ? `内容已保存到${platform}草稿`
@@ -6137,13 +6998,19 @@ function Publish({
           <div className="publish-tabs">
             <button
               className={filter === "pending" ? "active" : ""}
-              onClick={() => setFilter("pending")}
+              onClick={() => {
+                setFilter("pending");
+                setPublishPage(1);
+              }}
             >
               未发布 {pending.length}
             </button>
             <button
               className={filter === "published" ? "active" : ""}
-              onClick={() => setFilter("published")}
+              onClick={() => {
+                setFilter("published");
+                setPublishPage(1);
+              }}
             >
               完成记录 {published.length}
             </button>
@@ -6151,7 +7018,7 @@ function Publish({
         </div>
         {items.length ? (
           <div className="publish-list">
-            {items.map((claim) => (
+            {pagedPublishItems.map((claim) => (
               <article className="publish-card" key={claim.id}>
                 <div className="publish-card-main">
                   <span
@@ -6324,6 +7191,12 @@ function Publish({
                 )}
               </article>
             ))}
+            <Pagination
+              page={safePublishPage}
+              totalItems={items.length}
+              pageSize={publishPageSize}
+              onChange={setPublishPage}
+            />
           </div>
         ) : (
           <Empty
@@ -6450,7 +7323,10 @@ function Accounts({
 }: {
   platform: PlatformId;
   data: AppData;
-  action: (payload: Record<string, unknown>, success: string) => void;
+  action: (
+    payload: Record<string, unknown>,
+    success: string,
+  ) => Promise<boolean>;
   busy: boolean;
   reload: () => Promise<void>;
   notify: (message: string) => void;
@@ -7337,7 +8213,10 @@ function Settings({
   busy,
 }: {
   data: AppData;
-  action: (payload: Record<string, unknown>, success: string) => void;
+  action: (
+    payload: Record<string, unknown>,
+    success: string,
+  ) => Promise<boolean>;
   busy: boolean;
 }) {
   const [adding, setAdding] = useState(false);
@@ -7345,9 +8224,36 @@ function Settings({
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState(data.ai_settings.baseUrl);
   const [model, setModel] = useState(data.ai_settings.model);
+  const [imaClientId, setImaClientId] = useState("");
+  const [imaApiKey, setImaApiKey] = useState("");
+  const [imaKnowledgeBaseId, setImaKnowledgeBaseId] = useState(data.ima_settings.knowledgeBaseId);
+  const [imaKnowledgeBaseName, setImaKnowledgeBaseName] = useState(data.ima_settings.knowledgeBaseName);
+  const [imaKnowledgeBases, setImaKnowledgeBases] = useState<Array<{ id: string; name: string }>>([]);
+  const [imaSyncTopics, setImaSyncTopics] = useState(data.ima_settings.syncTopics);
+  const [imaSyncPublished, setImaSyncPublished] = useState(data.ima_settings.syncPublished);
+  const [imaBusy, setImaBusy] = useState(false);
+  const [imaMessage, setImaMessage] = useState("");
   const isAdmin = data.user.roles.includes("admin");
   const ai = data.ai_settings;
   const environmentManaged = ai.keySource === "environment";
+  async function imaRequest(payload: Record<string, unknown>) {
+    setImaBusy(true);
+    setImaMessage("");
+    try {
+      const result = await jsonRequest("/api/ima", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }) as { knowledgeBases?: Array<{ id: string; name: string }>; synced?: number; failed?: number };
+      if (result.knowledgeBases) {
+        setImaKnowledgeBases(result.knowledgeBases);
+        if (!imaKnowledgeBaseId && result.knowledgeBases[0]) {
+          setImaKnowledgeBaseId(result.knowledgeBases[0].id);
+          setImaKnowledgeBaseName(result.knowledgeBases[0].name);
+        }
+        setImaMessage(`连接成功，发现 ${result.knowledgeBases.length} 个可写知识库`);
+      } else if (payload.action === "sync_history") setImaMessage(`历史记录同步完成：成功 ${result.synced || 0}，失败 ${result.failed || 0}`);
+      else setImaMessage("IMA 自动同步配置已保存");
+    } catch (error) {
+      setImaMessage(error instanceof Error ? error.message : "IMA 操作失败");
+    } finally { setImaBusy(false); }
+  }
   function removeMember(member: User) {
     if (
       !window.confirm(
@@ -7560,6 +8466,31 @@ function Settings({
             ) : null}
           </div>
         </form>
+      </section>
+      <section className="panel settings-card ai-settings-card">
+        <div className="settings-title">
+          <div><span className="section-kicker">团队知识库</span><h2>IMA 自动同步</h2></div>
+          <span className={`ai-connection-state ${data.ima_settings.configured ? "ready" : ""}`}>{data.ima_settings.unavailable ? "运行管理器未连接" : data.ima_settings.configured ? "已连接" : "待配置"}</span>
+        </div>
+        <p className="ai-settings-intro">平台是唯一事实源。新选题与发布结果会自动写入 IMA；平台删除选题时，IMA 追加“已从平台删除”标记并停止后续同步，不执行物理删除。</p>
+        <div className="ai-settings-form">
+          <label>Client ID<input value={imaClientId} onChange={(event) => setImaClientId(event.target.value)} disabled={!isAdmin} placeholder={data.ima_settings.clientId || "IMA Client ID"} /></label>
+          <label>API Key<input type="password" value={imaApiKey} onChange={(event) => setImaApiKey(event.target.value)} disabled={!isAdmin} placeholder={data.ima_settings.configured ? "已保存；留空不会替换" : "仅保存到本机"} /></label>
+          <label>同步到知识库
+            <select value={imaKnowledgeBaseId} disabled={!isAdmin} onChange={(event) => { const item = imaKnowledgeBases.find((base) => base.id === event.target.value); setImaKnowledgeBaseId(event.target.value); setImaKnowledgeBaseName(item?.name || data.ima_settings.knowledgeBaseName); }}>
+              {imaKnowledgeBaseId ? <option value={imaKnowledgeBaseId}>{imaKnowledgeBaseName || imaKnowledgeBaseId}</option> : <option value="">先测试连接</option>}
+              {imaKnowledgeBases.filter((base) => base.id !== imaKnowledgeBaseId).map((base) => <option key={base.id} value={base.id}>{base.name}</option>)}
+            </select>
+          </label>
+          <label><input type="checkbox" checked={imaSyncTopics} onChange={(event) => setImaSyncTopics(event.target.checked)} /> 自动同步新增选题与逻辑删除</label>
+          <label><input type="checkbox" checked={imaSyncPublished} onChange={(event) => setImaSyncPublished(event.target.checked)} /> 自动同步已发布内容（含公众号草稿箱）</label>
+          {imaMessage ? <p className="helper">{imaMessage}</p> : null}
+          {isAdmin ? <div className="ai-settings-actions">
+            <button type="button" className="outline" disabled={imaBusy || (!imaApiKey && !data.ima_settings.configured)} onClick={() => imaRequest({ action: "test", client_id: imaClientId, api_key: imaApiKey })}>测试并读取知识库</button>
+            <button type="button" className="outline" disabled={imaBusy || !data.ima_settings.configured} onClick={() => imaRequest({ action: "sync_history" })}>同步现有记录</button>
+            <button type="button" className="primary" disabled={imaBusy || !imaKnowledgeBaseId} onClick={() => imaRequest({ action: "save", client_id: imaClientId, api_key: imaApiKey, knowledge_base_id: imaKnowledgeBaseId, knowledge_base_name: imaKnowledgeBaseName, sync_topics: imaSyncTopics, sync_published: imaSyncPublished })}>保存自动同步</button>
+          </div> : null}
+        </div>
       </section>
       {adding ? (
         <div className="modal-backdrop">

@@ -2,6 +2,8 @@ import { currentUser, rejectCrossSiteMutation } from "../../../lib/auth";
 import { audit, database, ensureDatabase } from "../../../lib/database";
 import { can, forbidden, roleGroups } from "../../../lib/permissions";
 import * as cheerio from "cheerio";
+import { syncTopicToIma } from "../../../lib/ima-sync";
+import { managerFetch } from "../../../lib/runtime-client";
 
 type SearchResult = { title?: string; url?: string; content?: string; publishedDate?: string; author?: string; engine?: string; engines?: string[] };
 
@@ -127,6 +129,11 @@ async function fetchArticle(rawUrl: string) {
   const type = response.headers.get("content-type") || "";
   if (!type.includes("html")) throw new Error("搜索结果不是文章网页");
   const html = (await response.text()).slice(0, 2_000_000);
+  if (
+    url.hostname.toLowerCase() === "mp.weixin.qq.com" &&
+    /wappoc_appmsgcaptcha|环境异常|secitptpage\/verify/.test(html)
+  )
+    throw new Error("微信正文触发访问验证");
   const text = articleText(html, url.hostname.toLowerCase());
   if (text.length < 300) throw new Error("未提取到足够的文章正文");
   const wechatAuthor = url.hostname.toLowerCase() === "mp.weixin.qq.com" ? decode(elementBodyById(html, "js_name").replace(/<[^>]+>/g, " ")).trim() : "";
@@ -169,9 +176,23 @@ async function sogouCookies() {
   } catch { return ""; }
 }
 
+function mergeSogouCookies(current: string, response: Response) {
+  const cookies = new Map<string, string>();
+  for (const part of current.split(";")) {
+    const [name, ...value] = part.trim().split("=");
+    if (name && value.length) cookies.set(name, value.join("="));
+  }
+  for (const item of response.headers.getSetCookie?.() || []) {
+    const [pair] = item.split(";");
+    const [name, ...value] = pair.trim().split("=");
+    if (name && value.length) cookies.set(name, value.join("="));
+  }
+  return [...cookies].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
 async function resolveSogouUrl(raw: string, cookie: string) {
   if (!raw.includes("weixin.sogou.com")) return raw;
-  const base = "ABTEST=7|1716888919|v1; IPLOC=CN3100; ariaDefaultTheme=default";
+  const base = "IPLOC=CN3100; ariaDefaultTheme=default";
   const response = await fetch(raw, { redirect: "manual", headers: { ...sogouHeaders, cookie: cookie ? `${base}; ${cookie}` : base, referer: "https://weixin.sogou.com/" }, signal: AbortSignal.timeout(12_000) });
   const location = response.headers.get("location") || "";
   if (location.includes("mp.weixin.qq.com")) return location;
@@ -183,16 +204,19 @@ async function resolveSogouUrl(raw: string, cookie: string) {
 }
 
 async function searchWechat(keyword: string) {
-  const cookie = await sogouCookies(); const collected: SearchResult[] = [];
+  let cookie = await sogouCookies(); const collected: SearchResult[] = [];
+  let resultRows = 0;
   for (const page of [1, 2]) {
     const url = new URL("https://weixin.sogou.com/weixin");
     url.searchParams.set("query", keyword); url.searchParams.set("type", "2"); url.searchParams.set("page", String(page)); url.searchParams.set("ie", "utf8"); url.searchParams.set("s_from", "input");
     const response = await fetch(url, { headers: { ...sogouHeaders, cookie, referer: "https://weixin.sogou.com/" }, signal: AbortSignal.timeout(20_000) });
     if (!response.ok) throw new Error(`搜狗微信搜索失败（${response.status}）`);
+    cookie = mergeSogouCookies(cookie, response);
     const html = await response.text();
     if (/antispider|请输入验证码|异常访问/.test(html)) throw new Error("搜狗微信触发访问验证，请稍后重试");
     const $ = cheerio.load(html); const rows = $("ul.news-list > li").toArray();
     if (!rows.length) break;
+    resultRows += rows.length;
     for (const row of rows) {
       const item = $(row), link = item.find("h3 a").first(); const href = String(link.attr("href") || "");
       const timestamp = item.find(".s-p script").text().match(/(\d{10})/)?.[1] || "";
@@ -202,6 +226,8 @@ async function searchWechat(keyword: string) {
       collected.push({ title: link.text().trim(), url: direct, content: item.find("p.txt-info").text().trim(), publishedDate: timestamp ? new Date(Number(timestamp) * 1000).toISOString() : "", author: item.find(".all-time-y2,a.account").first().text().trim(), engine: "sogou weixin", engines: ["sogou weixin"] });
     }
   }
+  if (resultRows && !collected.length)
+    throw new Error(`搜狗微信找到 ${resultRows} 条相关文章，但真实链接被访问验证拦截，请稍后重试`);
   return collected.slice(0, 20);
 }
 
@@ -210,6 +236,19 @@ async function searchServiceAvailable() {
     const response = await fetch(searchEndpoint(), { method: "HEAD", signal: AbortSignal.timeout(3_000) });
     return response.ok;
   } catch { return false; }
+}
+
+async function wechatSearchAvailable() {
+  try {
+    const response = await fetch("https://weixin.sogou.com/", {
+      method: "HEAD",
+      headers: sogouHeaders,
+      signal: AbortSignal.timeout(5_000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 export async function GET(request: Request) {
@@ -222,8 +261,24 @@ export async function GET(request: Request) {
     FROM article_research_entries e JOIN article_research_samples s ON s.id=e.sample_id
     WHERE e.platform=? AND e.status!='archived' AND s.processing_status='success' AND s.detail_text!=''
     ORDER BY e.status='new' DESC,e.trend_score DESC,e.last_seen_at DESC LIMIT 200`).bind(platform).all<Record<string, unknown>>();
+  const pendingRows = platform === "wechat"
+    ? await database().prepare(`SELECT s.*,e.id AS entry_id,e.platform,e.matched_keywords,e.search_engines,e.best_rank,
+      e.occurrence_count,e.relevance_score,e.trend_score,e.status,e.first_seen_at,e.last_seen_at
+      FROM article_research_entries e JOIN article_research_samples s ON s.id=e.sample_id
+      WHERE e.platform='wechat' AND e.status!='archived' AND s.processing_status IN ('verification_required','failed') AND s.detail_error='微信正文触发访问验证' AND s.detail_text=''
+      ORDER BY e.trend_score DESC,e.last_seen_at DESC LIMIT 100`).all<Record<string, unknown>>()
+    : { results: [] as Record<string, unknown>[] };
   const accounts = await database().prepare("SELECT id,name,status,persona,audience,content_pillars,strategy_keywords,excluded_topics FROM accounts WHERE platform=? AND is_demo=0 ORDER BY updated_at DESC").bind(platform).all<Record<string, unknown>>();
-  return Response.json({ configured: await searchServiceAvailable(), endpoint: searchEndpoint(), samples: rows.results.map((row) => ({ ...row, matched_keywords: parseJsonList(String(row.matched_keywords || "[]")), search_engines: parseJsonList(String(row.search_engines || "[]")) })), accounts: accounts.results });
+  const configured = platform === "wechat"
+    ? await wechatSearchAvailable()
+    : await searchServiceAvailable();
+  return Response.json({
+    configured,
+    endpoint: platform === "wechat" ? "https://weixin.sogou.com" : searchEndpoint(),
+    samples: rows.results.map((row) => ({ ...row, matched_keywords: parseJsonList(String(row.matched_keywords || "[]")), search_engines: parseJsonList(String(row.search_engines || "[]")) })),
+    pending_samples: pendingRows.results.map((row) => ({ ...row, matched_keywords: parseJsonList(String(row.matched_keywords || "[]")), search_engines: parseJsonList(String(row.search_engines || "[]")) })),
+    accounts: accounts.results,
+  });
 }
 
 export async function POST(request: Request) {
@@ -245,10 +300,12 @@ export async function POST(request: Request) {
     const excludeDomains = defaultExcludedDomains;
     const timeRange = ["day", "week", "month", "year", ""].includes(String(data.time_range || "")) ? String(data.time_range || "") : "month";
     if (!keywords.length) return Response.json({ error: "请至少输入一个筛选关键词" }, { status: 400 });
-    let discovered = 0; let fetched = 0; let candidates = 0; let rejectedPages = 0; let rejectedByTime = 0; const errors: string[] = [];
+    let discovered = 0; let fetched = 0; let candidates = 0; let rejectedPages = 0; let rejectedByTime = 0; let bodyFailures = 0; const errors: string[] = []; const bodyErrors = new Set<string>();
     for (const keyword of keywords) {
       const searchDomains = platform === "wechat"
-        ? [...(!includeDomains.length || includeDomains.includes("mp.weixin.qq.com") ? ["__wechat__"] : []), ...includeDomains.filter((item) => item !== "mp.weixin.qq.com")]
+        ? includeDomains.length
+          ? [...(includeDomains.includes("mp.weixin.qq.com") ? ["__wechat__"] : []), ...includeDomains.filter((item) => item !== "mp.weixin.qq.com")]
+          : ["__wechat__", ""]
         : includeDomains.length ? includeDomains : [""];
       for (const searchDomain of searchDomains) {
         const searchQuery = searchDomain && searchDomain !== "__wechat__" ? `${keyword} site:${searchDomain}` : keyword;
@@ -268,7 +325,7 @@ export async function POST(request: Request) {
         const matched = [...new Set([...(existingEntry ? parseJsonList(String(existingEntry.matched_keywords || "[]")) : []), keyword])];
         const engines = [...new Set([...(existingEntry ? parseJsonList(String(existingEntry.search_engines || "[]")) : []), ...(result.engines || []), result.engine || ""].filter(Boolean))];
         let detail = String(existing?.detail_text || ""); let author = String(existing?.author_name || result.author || ""); let publishedAt = String(existing?.published_at || result.publishedDate || ""); let processing = detail ? "success" : "failed"; let detailError = "";
-        if (!detail) try { const article = await fetchArticle(canonical); detail = article.text; author = article.author; publishedAt = article.publishedAt || publishedAt; processing = "success"; fetched += 1; } catch (error) { detailError = error instanceof Error ? error.message : "正文抓取失败"; }
+        if (!detail) try { const article = await fetchArticle(canonical); detail = article.text; author = article.author; publishedAt = article.publishedAt || publishedAt; processing = "success"; fetched += 1; } catch (error) { detailError = error instanceof Error ? error.message : "正文抓取失败"; processing = platform === "wechat" && detailError === "微信正文触发访问验证" ? "verification_required" : "failed"; bodyFailures += 1; bodyErrors.add(detailError); }
         if (processing === "success" && !withinTimeRange(publishedAt, timeRange)) { rejectedByTime += 1; continue; }
         const bestRank = Math.min(Number(existingEntry?.best_rank || 999), rank + 1);
         const occurrences = matched.length;
@@ -290,8 +347,74 @@ export async function POST(request: Request) {
       }
     }
     await audit(user.id, `执行${platform === "wechat" ? "公众号" : "知乎SEO"}文章搜索`, "article_research", crypto.randomUUID(), `${keywords.join("、")} / 候选${candidates} / 非文章${rejectedPages} / 时间不符${rejectedByTime} / 发现${discovered} / 正文${fetched}`);
+    const verificationRequired = platform === "wechat"
+      ? Number((await db.prepare(`SELECT COUNT(*) AS count FROM article_research_entries e JOIN article_research_samples s ON s.id=e.sample_id WHERE e.platform='wechat' AND e.status!='archived' AND s.processing_status IN ('verification_required','failed') AND s.detail_error='微信正文触发访问验证' AND s.detail_text=''`).first<{ count: number }>())?.count || 0)
+      : 0;
+    if (!discovered && bodyFailures && !verificationRequired)
+      return Response.json({ error: `已找到 ${candidates} 条相关文章，但 ${bodyFailures} 条正文未抓取成功：${[...bodyErrors].join("、")}。未获得正文的文章不会进入选题库。` }, { status: 502 });
     if (!discovered && errors.length) return Response.json({ error: errors.join("；") }, { status: 502 });
-    return Response.json({ ok: true, discovered, fetched, candidates, rejected_pages: rejectedPages, rejected_by_time: rejectedByTime, errors });
+    return Response.json({ ok: true, discovered, fetched, candidates, rejected_pages: rejectedPages, rejected_by_time: rejectedByTime, body_failures: bodyFailures, verification_required: verificationRequired, errors });
+  }
+
+  if (action === "open_wechat_reader") {
+    const sampleId = String(data.sample_id || "");
+    const sample = await db.prepare(`SELECT s.source_url FROM article_research_samples s JOIN article_research_entries e ON e.sample_id=s.id WHERE s.id=? AND e.platform='wechat' AND e.status!='archived'`).bind(sampleId).first<{ source_url: string }>();
+    if (!sample) return Response.json({ error: "待读取文章不存在" }, { status: 404 });
+    const response = await managerFetch("/wechat/article-reader/open", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ readerId: sampleId, url: sample.source_url }) });
+    const result = await response.json() as Record<string, unknown>;
+    if (!response.ok) return Response.json({ error: String(result.error || "无法打开微信正文验证窗口") }, { status: response.status });
+    return Response.json(result);
+  }
+
+  if (action === "capture_wechat_reader") {
+    const sampleId = String(data.sample_id || "");
+    const sample = await db.prepare(`SELECT s.id FROM article_research_samples s JOIN article_research_entries e ON e.sample_id=s.id WHERE s.id=? AND e.platform='wechat' AND e.status!='archived'`).bind(sampleId).first<{ id: string }>();
+    if (!sample) return Response.json({ error: "待读取文章不存在" }, { status: 404 });
+    const response = await managerFetch("/wechat/article-reader/capture", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ readerId: sampleId }) });
+    const result = await response.json() as Record<string, unknown>;
+    if (!response.ok) return Response.json({ error: String(result.error || "微信正文读取失败") }, { status: response.status });
+    const text = String(result.text || "").trim();
+    if (text.length < 300) return Response.json({ error: "读取到的正文内容不足" }, { status: 409 });
+    const author = String(result.author || "").slice(0, 160);
+    await db.prepare(`UPDATE article_research_samples SET detail_text=?,author_name=CASE WHEN ?!='' THEN ? ELSE author_name END,published_at=COALESCE(NULLIF(?,''),published_at),processing_status='success',detail_error='',last_seen_at=? WHERE id=?`)
+      .bind(text.slice(0, 30000), author, author, String(result.published_at || ""), now, sampleId).run();
+    await audit(user.id, "通过本地验证窗口读取公众号正文", "article_research", sampleId, `${text.length} 字`);
+    return Response.json({ ok: true, sample_id: sampleId, text_length: text.length });
+  }
+
+  if (action === "capture_wechat_reader_batch") {
+    const sampleIds = list(data.sample_ids, 10).filter((id) => /^[a-zA-Z0-9_-]{8,100}$/.test(id));
+    if (!sampleIds.length) return Response.json({ error: "没有待批量读取的文章" }, { status: 400 });
+    const placeholders = sampleIds.map(() => "?").join(",");
+    const rows = await db.prepare(`SELECT s.id,s.source_url FROM article_research_samples s JOIN article_research_entries e ON e.sample_id=s.id WHERE e.platform='wechat' AND e.status!='archived' AND s.detail_text='' AND s.id IN (${placeholders})`).bind(...sampleIds).all<{ id: string; source_url: string }>();
+    const byId = new Map(rows.results.map((row) => [row.id, row]));
+    const items = sampleIds.map((id) => byId.get(id)).filter((row): row is { id: string; source_url: string } => Boolean(row));
+    if (!items.length) return Response.json({ error: "待批量读取文章不存在或已经完成" }, { status: 404 });
+    const response = await managerFetch("/wechat/article-reader/capture-batch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ items: items.map((item) => ({ id: item.id, url: item.source_url })) }),
+    });
+    const payload = await response.json() as { error?: string; results?: Array<{ id: string; text: string; author?: string; published_at?: string }>; skipped?: Array<{ id: string; reason?: string }>; verification_required_id?: string };
+    if (!response.ok) return Response.json({ error: String(payload.error || "批量读取公众号正文失败") }, { status: response.status });
+    const results = (payload.results || []).filter((item) => byId.has(item.id) && String(item.text || "").trim().length >= 300);
+    if (results.length) {
+      await db.batch(results.map((item) => {
+        const text = String(item.text).trim().slice(0, 30000);
+        const author = String(item.author || "").slice(0, 160);
+        return db.prepare(`UPDATE article_research_samples SET detail_text=?,author_name=CASE WHEN ?!='' THEN ? ELSE author_name END,published_at=COALESCE(NULLIF(?,''),published_at),processing_status='success',detail_error='',last_seen_at=? WHERE id=?`)
+          .bind(text, author, author, String(item.published_at || ""), now, item.id);
+      }));
+    }
+    const skipped = (payload.skipped || [])
+      .filter((item) => byId.has(item.id))
+      .map((item) => ({ id: item.id, reason: String(item.reason || "公众号文章已失效或无法读取").slice(0, 300) }));
+    if (skipped.length) {
+      await db.batch(skipped.map((item) => db.prepare(`UPDATE article_research_samples SET processing_status='failed',detail_error=?,last_seen_at=? WHERE id=? AND detail_text=''`)
+        .bind(item.reason, now, item.id)));
+    }
+    await audit(user.id, "批量读取公众号正文", "article_research", crypto.randomUUID(), `请求${items.length}篇 / 成功${results.length}篇 / 跳过${skipped.length}篇 / ${payload.verification_required_id ? "再次触发验证" : "批次完成"}`);
+    return Response.json({ ok: true, requested: items.length, completed: results.length, skipped: skipped.length, verification_required: Boolean(payload.verification_required_id) });
   }
 
   if (action === "create_topic") {
@@ -311,6 +434,7 @@ export async function POST(request: Request) {
       db.prepare("UPDATE article_research_entries SET status='used' WHERE sample_id=? AND platform=?").bind(sampleId, platform),
     ]);
     await audit(user.id, `从文章样本创建${platform === "wechat" ? "公众号" : "知乎SEO"}选题`, "article_research", sampleId, topicTitle);
+    await syncTopicToIma(db, topicId);
     return Response.json({ ok: true, topic_id: topicId });
   }
 

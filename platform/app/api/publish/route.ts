@@ -1,9 +1,14 @@
 import { currentUser, rejectCrossSiteMutation } from "../../../lib/auth";
 import { audit, database, ensureDatabase } from "../../../lib/database";
-import { callMcpTool, checkMcpLogin, readMcpIdentity } from "../../../lib/xhs-mcp";
+import {
+  callMcpTool,
+  checkMcpLogin,
+  readMcpIdentity,
+} from "../../../lib/xhs-mcp";
 import { can, forbidden, roleGroups } from "../../../lib/permissions";
 import { managerFetch } from "../../../lib/runtime-client";
 import { canAccessAccount } from "../../../lib/account-access";
+import { syncPublishedToIma } from "../../../lib/ima-sync";
 
 type PublishClaim = {
   id: string;
@@ -55,11 +60,10 @@ export async function POST(request: Request) {
   await ensureDatabase();
   const crossSite = rejectCrossSiteMutation(request);
   if (crossSite) return crossSite;
-  const user = await currentUser(request);
-  if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
   const data = (await request.json()) as {
     action?: string;
     claim_id?: string;
+    plan_id?: string;
     reason?: string;
     outcome?: string;
     theme?: string;
@@ -70,6 +74,40 @@ export async function POST(request: Request) {
       primary?: string;
     };
   };
+  let user = await currentUser(request);
+  const token = process.env.RUNTIME_MANAGER_TOKEN;
+  if (
+    data.action === "execute_plan" &&
+    token &&
+    request.headers.get("authorization") === `Bearer ${token}`
+  ) {
+    const plan = await database()
+      .prepare(
+        `SELECT p.*,c.snapshot AS current_snapshot FROM publication_plans p JOIN claims c ON c.id=p.claim_id
+      WHERE p.id=? AND p.status='running' AND p.execute_at<=?`,
+      )
+      .bind(String(data.plan_id || ""), new Date().toISOString())
+      .first<{
+        claim_id: string;
+        requested_by: string;
+        snapshot: string;
+        current_snapshot: string;
+      }>();
+    if (!plan || plan.snapshot !== plan.current_snapshot)
+      return Response.json(
+        { error: "排期对应的审核快照已经变化，已取消自动发布" },
+        { status: 409 },
+      );
+    user = await database()
+      .prepare(
+        "SELECT id,name,username,roles,status FROM users WHERE id=? AND status='active'",
+      )
+      .bind(plan.requested_by)
+      .first<import("../../../lib/database").DbUser>();
+    data.claim_id = plan.claim_id;
+    data.action = "publish_now";
+  }
+  if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
   const claimId = String(data.claim_id ?? "");
   const db = database();
   const claim = await db
@@ -94,11 +132,18 @@ export async function POST(request: Request) {
     claim.account_platform === "wechat" &&
     claim.content_type === "wechat_article";
   const isBrowserPublish =
-    (claim.account_platform === "douyin" && ["douyin_image", "douyin_video"].includes(claim.content_type)) ||
-    (claim.account_platform === "wechat_channels" && claim.content_type === "wechat_channels_video");
-  const isVideoContent = ["xiaohongshu_video", "douyin_video", "wechat_channels_video"].includes(claim.content_type);
+    (claim.account_platform === "douyin" &&
+      ["douyin_image", "douyin_video"].includes(claim.content_type)) ||
+    (claim.account_platform === "wechat_channels" &&
+      claim.content_type === "wechat_channels_video");
+  const isVideoContent = [
+    "xiaohongshu_video",
+    "douyin_video",
+    "wechat_channels_video",
+  ].includes(claim.content_type);
   const isXiaohongshuVideo =
-    claim.account_platform === "xiaohongshu" && claim.content_type === "xiaohongshu_video";
+    claim.account_platform === "xiaohongshu" &&
+    claim.content_type === "xiaohongshu_video";
   const themes = new Set([
     "default",
     "grace",
@@ -129,8 +174,14 @@ export async function POST(request: Request) {
           body?: string;
           wechat_theme?: string;
           wechat_style?: Record<string, unknown>;
-          creative?: { video_options?: { mode?: string; schedule_at?: string } };
-          media_assets?: Array<{ kind?: string; path?: string; sha256?: string }>;
+          creative?: {
+            video_options?: { mode?: string; schedule_at?: string };
+          };
+          media_assets?: Array<{
+            kind?: string;
+            path?: string;
+            sha256?: string;
+          }>;
         })
       : null;
     const theme = String(
@@ -210,6 +261,8 @@ export async function POST(request: Request) {
         { error: "任务状态已变化，请刷新后重试" },
         { status: 409 },
       );
+    await db.prepare("UPDATE publication_plans SET status='canceled',completed_at=? WHERE claim_id=? AND status='pending'")
+      .bind(returnedAt, claim.id).run();
     await audit(
       user.id,
       "发布前退回修改",
@@ -309,6 +362,7 @@ export async function POST(request: Request) {
       claim.id,
       reason,
     );
+    if (outcome === "published") await syncPublishedToIma(db, claim.id);
     return Response.json({ ok: true, status: outcome });
   }
 
@@ -337,12 +391,20 @@ export async function POST(request: Request) {
     const isZhihuArticle =
       claim.account_platform === "zhihu" &&
       claim.content_type === "zhihu_article";
-    if (!isZhihuArticle && !isWechatArticle && !isBrowserPublish && !claim.xhs_user_id)
+    if (
+      !isZhihuArticle &&
+      !isWechatArticle &&
+      !isBrowserPublish &&
+      !claim.xhs_user_id
+    )
       return Response.json(
         { error: `${claim.account_name} 尚未完成登录和身份绑定` },
         { status: 409 },
       );
-    if (["xiaohongshu_note", "douyin_image"].includes(claim.content_type) && !images.length)
+    if (
+      ["xiaohongshu_note", "douyin_image"].includes(claim.content_type) &&
+      !images.length
+    )
       return Response.json(
         {
           error: isWechatArticle
@@ -361,13 +423,20 @@ export async function POST(request: Request) {
         { error: `${claim.account_name} 尚未配置公众号开发者接口` },
         { status: 409 },
       );
-    if (isBrowserPublish && (claim.auth_method !== "browser" || !claim.external_user_id))
+    if (
+      isBrowserPublish &&
+      (claim.auth_method !== "browser" || !claim.external_user_id)
+    )
       return Response.json(
         { error: `${claim.account_name} 尚未完成浏览器登录和身份绑定` },
         { status: 409 },
       );
-    const mediaAssets = Array.isArray(frozen?.media_assets) ? frozen.media_assets : [];
-    const videoAsset = mediaAssets.find((asset) => asset.kind === "video" && asset.path);
+    const mediaAssets = Array.isArray(frozen?.media_assets)
+      ? frozen.media_assets
+      : [];
+    const videoAsset = mediaAssets.find(
+      (asset) => asset.kind === "video" && asset.path,
+    );
     if (isVideoContent && !videoAsset?.path)
       return Response.json(
         { error: "审核快照缺少成品视频，请退回修改后重新审核" },
@@ -434,7 +503,11 @@ export async function POST(request: Request) {
       if (isZhihuArticle || isWechatArticle || isBrowserPublish) {
         publishDispatched = true;
         const response = await managerFetch(
-          isBrowserPublish ? "/social/publish" : isWechatArticle ? "/wechat/publish" : "/zhihu/publish",
+          isBrowserPublish
+            ? "/social/publish"
+            : isWechatArticle
+              ? "/wechat/publish"
+              : "/zhihu/publish",
           {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -450,32 +523,45 @@ export async function POST(request: Request) {
                     tags,
                     imagePaths: images,
                     videoPath: videoAsset?.path,
-                    coverLandscapePath: mediaAssets.find((asset) => asset.kind === "cover_landscape")?.path || "",
-                    coverPortraitPath: mediaAssets.find((asset) => asset.kind === "cover_portrait")?.path || "",
-                    mode: frozen?.creative?.video_options?.mode === "draft" ? "draft" : "publish",
-                    scheduleAt: String(frozen?.creative?.video_options?.schedule_at || ""),
+                    coverLandscapePath:
+                      mediaAssets.find(
+                        (asset) => asset.kind === "cover_landscape",
+                      )?.path || "",
+                    coverPortraitPath:
+                      mediaAssets.find(
+                        (asset) => asset.kind === "cover_portrait",
+                      )?.path || "",
+                    mode:
+                      frozen?.creative?.video_options?.mode === "draft"
+                        ? "draft"
+                        : frozen?.creative?.video_options?.mode === "manual"
+                          ? "manual"
+                          : "publish",
+                    scheduleAt: String(
+                      frozen?.creative?.video_options?.schedule_at || "",
+                    ),
                   }
                 : isWechatArticle
-                ? {
-                    accountId: claim.account_id,
-                    title,
-                    body,
-                    images,
-                    author: claim.account_name,
-                    openComment: true,
-                    theme:
-                      frozen?.wechat_theme || claim.wechat_theme || "default",
-                    style:
-                      frozen?.wechat_style ||
-                      JSON.parse(claim.wechat_style || "{}"),
-                  }
-                : {
-                    accountId: claim.account_id,
-                    title,
-                    body,
-                    authMethod: claim.auth_method,
-                    creationStatement: "ai_creation",
-                  },
+                  ? {
+                      accountId: claim.account_id,
+                      title,
+                      body,
+                      images,
+                      author: claim.account_name,
+                      openComment: true,
+                      theme:
+                        frozen?.wechat_theme || claim.wechat_theme || "default",
+                      style:
+                        frozen?.wechat_style ||
+                        JSON.parse(claim.wechat_style || "{}"),
+                    }
+                  : {
+                      accountId: claim.account_id,
+                      title,
+                      body,
+                      authMethod: claim.auth_method,
+                      creationStatement: "ai_creation",
+                    },
             ),
           },
         ).catch(() => null);
@@ -494,16 +580,35 @@ export async function POST(request: Request) {
         if (!response.ok)
           throw new Error(
             payload.error ||
-              (isBrowserPublish ? "平台内容发布失败" : isWechatArticle ? "公众号草稿提交失败" : "知乎发布失败"),
+              (isBrowserPublish
+                ? "平台内容发布失败"
+                : isWechatArticle
+                  ? "公众号草稿提交失败"
+                  : "知乎发布失败"),
           );
         const publishedAt = new Date().toISOString();
-        const completedStatus = isBrowserPublish && ["drafted", "scheduled", "published"].includes(String(payload.status))
-          ? String(payload.status)
-          : isWechatArticle ? "drafted" : "published";
-        const recordedPublishedAt = ["drafted", "scheduled"].includes(completedStatus) ? null : publishedAt;
+        const completedStatus =
+          isBrowserPublish &&
+          ["drafted", "scheduled", "published", "awaiting_user"].includes(
+            String(payload.status),
+          )
+            ? String(payload.status)
+            : isWechatArticle
+              ? "drafted"
+              : "published";
+        const recordedPublishedAt =
+          completedStatus === "awaiting_user"
+            ? null
+            : ["drafted", "scheduled"].includes(completedStatus)
+              ? null
+              : publishedAt;
         const detail = String(
           payload.detail ||
-            (isBrowserPublish ? `${claim.account_platform === "douyin" ? "抖音" : "视频号"}${claim.content_type === "douyin_image" ? "图文" : "视频"}已提交` : isWechatArticle ? "已写入公众号草稿箱" : "知乎专栏已发布"),
+            (isBrowserPublish
+              ? `${claim.account_platform === "douyin" ? "抖音" : "视频号"}${claim.content_type === "douyin_image" ? "图文" : "视频"}已提交`
+              : isWechatArticle
+                ? "已写入公众号草稿箱"
+                : "知乎专栏已发布"),
         );
         await db.batch([
           db
@@ -535,13 +640,14 @@ export async function POST(request: Request) {
             ? "通过公众号开发者接口写入草稿箱"
             : isBrowserPublish
               ? `通过浏览器提交${claim.account_platform === "douyin" ? "抖音" : "视频号"}${claim.content_type === "douyin_image" ? "图文" : "视频"}`
-            : claim.auth_method === "browser"
-              ? "通过知乎浏览器发布专栏"
-              : "通过知乎开放平台发布专栏",
+              : claim.auth_method === "browser"
+                ? "通过知乎浏览器发布专栏"
+                : "通过知乎开放平台发布专栏",
           "claim",
           claim.id,
           `${claim.account_name} / 操作人 ${user.name}${payload.url ? ` / ${payload.url}` : ""}`,
         );
+        await syncPublishedToIma(db, claim.id);
         return Response.json({
           ok: true,
           status: completedStatus,
@@ -566,7 +672,9 @@ export async function POST(request: Request) {
         );
       }
       if (!claim.xhs_user_id)
-        throw new Error(`${claim.account_name} 尚未绑定稳定账号ID，请先到账号中心重新核验`);
+        throw new Error(
+          `${claim.account_name} 尚未绑定稳定账号ID，请先到账号中心重新核验`,
+        );
       const identity = await readMcpIdentity(port);
       if (identity.userId !== claim.xhs_user_id)
         throw new Error(
@@ -621,6 +729,7 @@ export async function POST(request: Request) {
         claim.id,
         `${claim.account_name} / 发布人 ${user.name} / ${isXiaohongshuVideo ? "1 个视频" : `${images.length} 张图片`}`,
       );
+      await syncPublishedToIma(db, claim.id);
       await runtime("release", claim.account_id);
       acquired = false;
       return Response.json({ ok: true, published_at: publishedAt, detail });
@@ -630,11 +739,11 @@ export async function POST(request: Request) {
           ? error.message
           : isZhihuArticle
             ? "知乎发布失败"
-          : isWechatArticle
-            ? "公众号草稿提交失败"
-            : isBrowserPublish
-              ? "平台内容发布失败"
-              : "小红书发布失败";
+            : isWechatArticle
+              ? "公众号草稿提交失败"
+              : isBrowserPublish
+                ? "平台内容发布失败"
+                : "小红书发布失败";
       const completedAt = new Date().toISOString();
       const uncertain = publishDispatched && isUncertainPublishError(message);
       const platformLabel = isZhihuArticle
@@ -642,8 +751,10 @@ export async function POST(request: Request) {
         : isWechatArticle
           ? "公众号草稿箱"
           : isBrowserPublish
-            ? claim.account_platform === "douyin" ? "抖音创作者中心" : "视频号助手"
-          : "小红书";
+            ? claim.account_platform === "douyin"
+              ? "抖音创作者中心"
+              : "视频号助手"
+            : "小红书";
       const safeMessage = uncertain
         ? `发布结果待核验：${message}。请先到${platformLabel}确认是否已发布，不能直接重试。`
         : message;

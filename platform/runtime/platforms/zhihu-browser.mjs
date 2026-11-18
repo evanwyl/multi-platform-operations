@@ -3,6 +3,22 @@ import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 
 const sessions = new Map();
+const metricAccounts = new Set();
+
+export async function withZhihuMetricPage(root, appRoot, accountId, callback) {
+  validAccountId(accountId);
+  if (sessions.has(accountId) || metricAccounts.has(accountId)) throw new Error("该知乎账号浏览器正在使用中，请稍后采集");
+  metricAccounts.add(accountId);
+  let browser;
+  try {
+    browser = await launchContext(root, appRoot, accountId, true);
+    if (!(await loginState(browser)).authenticated) throw new Error("知乎登录已失效，请重新登录");
+    return await callback(browser.pages()[0] || await browser.newPage());
+  } finally {
+    if (browser) await browser.close().catch(() => undefined);
+    metricAccounts.delete(accountId);
+  }
+}
 const browserCandidates = [
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
@@ -127,6 +143,7 @@ async function firstVisible(page, selectors, timeout = 15_000) {
 
 export async function publishZhihuArticleBrowser(platformAccountRoot, appRoot, payload) {
   const accountId = validAccountId(payload?.accountId);
+  if (metricAccounts.has(accountId)) throw Object.assign(new Error("该账号正在采集数据，请稍后发布"), { status: 409 });
   const title = String(payload?.title || "").trim();
   const body = String(payload?.body || "").trim();
   if (!title || !body) throw Object.assign(new Error("知乎专栏标题和正文不能为空"), { status: 400 });

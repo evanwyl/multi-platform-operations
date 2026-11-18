@@ -2,23 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-
-test("renders the local operations platform shell", async () => {
-  const { default: worker } = await import(workerUrl.href);
-  const response = await worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html" } }),
-    {
-      ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
-    },
-    { waitUntil() {}, passThroughOnException() {} },
-  );
-  assert.equal(response.status, 200);
-  const html = await response.text();
-  assert.match(html, /<title>多平台内容运营<\/title>/);
-  assert.match(html, /正在启动多平台内容运营/);
-  assert.doesNotMatch(html, /codex-preview/);
-});
+// HTTP rendering is verified in operations-api.test.mjs under an actual isolated
+// workerd runtime. Recent Vinext output imports cloudflare:workers and cannot be
+// faithfully executed with Node's default module loader.
 
 test("opens an explicit account menu before signing out and shows AI wait progress", async () => {
   const source = await readFile(
@@ -480,7 +466,10 @@ test("supports selecting and safely bulk deleting topics", async () => {
     "utf8",
   );
   assert.match(source, /selectedTopics/);
-  assert.match(source, /全选当前分类/);
+  assert.match(source, /全选当前页/);
+  assert.match(source, /const \[topicFilter, setTopicFilter\] = useState\("all"\)/);
+  assert.match(source, /function Pagination/);
+  assert.match(source, /pageSize = 10/);
   assert.match(source, /archive_topics_bulk/);
   assert.match(source, /confirmingTopicDelete/);
   assert.match(source, /已有的认领、创作、审核和发布记录会继续保留/);
@@ -673,12 +662,18 @@ test("shows complete content task labels and separates review from real publishi
     "utf8",
   );
   assert.match(source, /claim\.title \|\| claim\.topic_title/);
-  assert.match(source, /nav-group-label">平台选择/);
+  assert.match(source, /nav-group-label">运营流程/);
+  assert.match(source, /nav-group-label">账号与平台/);
+  assert.match(source, /选题中心/);
+  assert.match(source, /内容创作/);
+  assert.match(source, /审核中心/);
+  assert.match(source, /发布记录/);
   assert.doesNotMatch(source, /平台快捷入口/);
   assert.doesNotMatch(source, /function PlatformCenter/);
   assert.doesNotMatch(source, /function PlatformWorkspace/);
-  assert.match(source, /nav-group-label">总览/);
-  assert.match(source, />\s*工作台\s*<\/button>/);
+  assert.doesNotMatch(source, /nav-group-label">智能工作区/);
+  assert.match(source, /ops-goal-hero/);
+  assert.match(source, /ops-asset-table/);
   assert.doesNotMatch(source, /goPlatformView\("dashboard"/);
   assert.match(source, />\s*爆款搜索\s*<\/button>/);
   assert.match(
@@ -760,7 +755,8 @@ test("uses one restrained product theme and one consistent icon family", async (
   assert.match(source, /<MetricIcon aria-hidden="true" size=\{19\}/);
   assert.match(source, /className="skip-link" href="#main-content"/);
   assert.match(source, /aria-current=\{active \? "page" : undefined\}/);
-  assert.match(source, /nav-group-label">平台选择/);
+  assert.match(source, /nav-group-label">运营流程/);
+  assert.match(source, /nav-group-label">账号与平台/);
   assert.match(source, /账号资料与内容概览/);
   assert.doesNotMatch(source, /<header className=\{`topbar/);
   assert.doesNotMatch(source, />新建内容<\/button>/);
@@ -776,13 +772,13 @@ test("uses one restrained product theme and one consistent icon family", async (
   );
   assert.match(theme, /\.focus-card h2\s*\{[^}]*white-space: nowrap/s);
   assert.match(layout, /import "\.\/product-theme\.css"/);
-  assert.match(theme, /--brand-primary: #4f63d8/);
+  assert.match(theme, /--brand-primary: #1b9af2/);
   assert.match(theme, /--channel-xhs: #d85a62/);
   assert.match(theme, /--channel-zhihu: #1677ff/);
   assert.match(theme, /--radius-card: 14px/);
   assert.match(theme, /--radius-control: 9px/);
   assert.match(theme, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.doesNotMatch(theme, /#006eff|#1b9af2|#6547d6/);
+  assert.match(theme, /background: linear-gradient\(180deg, #17345b 0%, #0d213b 100%\)/);
 });
 
 test("uses one page scrollbar for content creation", async () => {
@@ -954,4 +950,16 @@ test("builds trend research records around text, metrics, and per-sample analysi
   assert.match(schema, /is_relevant/);
   assert.match(schema, /information_density_score/);
   assert.match(schema, /remix_value_score/);
+});
+
+test("keeps manual topic input when creation fails and handles expired sessions", async () => {
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /class RequestError extends Error/);
+  assert.match(source, /error instanceof RequestError && error\.status === 401/);
+  assert.match(source, /登录已过期，请重新登录后继续/);
+  assert.match(source, /const created = await action\(/);
+  assert.match(source, /if \(created\) \{\s*setTitle\(""\);\s*setUrl\(""\);/s);
 });

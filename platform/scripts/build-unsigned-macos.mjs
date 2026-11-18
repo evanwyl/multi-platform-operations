@@ -198,6 +198,7 @@ for (const schema of [
   "trend-plan.schema.json",
   "candidate-screen.schema.json",
   "topic-analysis.schema.json",
+  "remix-analysis.schema.json",
   "content-draft.schema.json",
   "zhihu-article-draft.schema.json",
   "wechat-cover-prompt.schema.json",
@@ -227,6 +228,7 @@ makeCopiedSymlinksPortable(packagedChromium, chromiumBundle);
 mkdirSync(resolve(packagedApp, "scripts"), { recursive: true });
 for (const script of [
   "app-service.mjs",
+  "operations-scheduler.mjs",
   "backup-local.mjs",
   "restore-local.mjs",
 ]) {
@@ -252,7 +254,7 @@ const runtimePackage = {
   private: true,
   type: "module",
   dependencies: {
-    wrangler: "4.132.0",
+    wrangler: "4.152.0",
     "playwright-core": "1.55.0",
     marked: "18.0.13",
     "sanitize-html": "2.17.7",

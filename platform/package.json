@@ -1,6 +1,6 @@
 {
   "name": "hongshutai-local",
-  "version": "0.21.5",
+  "version": "0.22.0",
   "license": "Apache-2.0",
   "private": true,
   "engines": {
@@ -29,8 +29,8 @@
     "drizzle-orm": "0.45.2",
     "marked": "^18.0.13",
     "playwright-core": "^1.55.0",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "sanitize-html": "^2.18.1",
     "tar": "7.5.22"
   },
@@ -53,12 +53,12 @@
     "eslint-plugin-react": "7.37.5",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "16.4.0",
-    "react-server-dom-webpack": "^19.3.0",
+    "react-server-dom-webpack": "^19.3.1",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
     "typescript-eslint": "8.59.3",
-    "vinext": "^1.0.0-beta.10",
-    "vite": "^8.3.5",
+    "vinext": "^1.4.6",
+    "vite": "^8.3.8",
     "wrangler": "^4.152.0"
   },
   "overrides": {
