@@ -9,7 +9,53 @@ import {
   interactionRate,
   metricLeaseSql,
   reviewSnapshot,
+  verifiedXhsProfile,
+  xhsProfileMetrics,
 } from "../runtime/platforms/operations-core.mjs";
+
+test("verifies unique RED ID for read-only MCP compatibility and never matches nickname alone", () => {
+  const account = {
+    xhs_user_id: "expected-user",
+    xhs_red_id: "test-red-account",
+  };
+  const profile = {
+    userBasicInfo: { nickname: "测试账号", redId: "test-red-account" },
+    interactions: [{ type: "fans", count: "1.2万" }],
+    feeds: [
+      {
+        id: "1234567890abcdef12345678",
+        noteCard: {
+          displayTitle: "测试作品",
+          interactInfo: { likedCount: "15" },
+        },
+      },
+    ],
+  };
+  assert.equal(verifiedXhsProfile(profile, account), true);
+  assert.equal(
+    verifiedXhsProfile({ userBasicInfo: { nickname: "测试账号" } }, account),
+    false,
+  );
+  assert.equal(
+    verifiedXhsProfile(
+      { userBasicInfo: { ...profile.userBasicInfo, userId: "other-user" } },
+      account,
+    ),
+    false,
+  );
+  assert.equal(xhsProfileMetrics(profile, null, account).followers, 12000);
+  const result = xhsProfileMetrics(
+    profile,
+    { title: "测试作品", external_content_id: "1234567890abcdef12345678" },
+    account,
+  );
+  assert.equal(result.metric.likes, 15);
+  assert.equal(result.metric.views, null);
+  assert.equal(
+    xhsProfileMetrics(profile, { title: "另一个作品" }, account),
+    null,
+  );
+});
 
 test("normalizes measured numbers without turning missing values into zero", () => {
   for (const [input, expected] of [

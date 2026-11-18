@@ -10,8 +10,10 @@ import {
   collectionInterval,
   contentIdentity,
   metricLeaseSql,
+  verifiedXhsProfile,
+  xhsProfileMetrics,
 } from "../../../runtime/platforms/operations-core.mjs";
-import { readMcpIdentity } from "../../../lib/xhs-mcp";
+import { callMcpTool, readMcpIdentity } from "../../../lib/xhs-mcp";
 
 type Row = Record<string, string | number | null>;
 const collectable = new Set([
@@ -197,19 +199,29 @@ async function tick() {
           Date.now() - Date.parse(String(row.last_attempt)) >= 86400e3)
       )
         await enqueue(String(row.id), "", "scheduler");
-      const health = await db.prepare("SELECT created_at FROM metric_jobs WHERE account_id=? AND claim_id='__health__' ORDER BY created_at DESC LIMIT 1")
-        .bind(row.id).first<Row>();
-      if (collectable.has(String(row.platform)) && (!health || Date.now() - Date.parse(String(health.created_at)) >= 3600e3)) await enqueue(String(row.id), "__health__", "scheduler");
+      const health = await db
+        .prepare(
+          "SELECT created_at FROM metric_jobs WHERE account_id=? AND claim_id='__health__' ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(row.id)
+        .first<Row>();
+      if (
+        collectable.has(String(row.platform)) &&
+        (!health ||
+          Date.now() - Date.parse(String(health.created_at)) >= 3600e3)
+      )
+        await enqueue(String(row.id), "__health__", "scheduler");
     }
   }
   // A single atomic lease serializes browser access across requests and accounts.
   const leased = await db.prepare(metricLeaseSql).bind(now).first<Row>();
   if (!leased) return Response.json({ ok: true, idle: true });
   let xhsLease = false;
+  let xhsProfile: unknown = null;
   try {
     const account = await db
       .prepare(
-        "SELECT id,platform,external_user_id,xhs_user_id FROM accounts WHERE id=? AND is_demo=0",
+        "SELECT id,platform,external_user_id,xhs_user_id,xhs_red_id FROM accounts WHERE id=? AND is_demo=0",
       )
       .bind(leased.account_id)
       .first<Row>();
@@ -227,26 +239,52 @@ async function tick() {
       if (!acquired.ok || !result.port)
         throw new Error(result.error || "小红书账号运行器不可用");
       xhsLease = true;
-      const identity = await readMcpIdentity(result.port);
-      if (!account.xhs_user_id || identity.userId !== account.xhs_user_id)
+      const identity = await readMcpIdentity(result.port).catch(() => null);
+      if (
+        identity &&
+        account.xhs_user_id &&
+        identity.userId !== account.xhs_user_id
+      )
         throw new Error("小红书当前账号身份与绑定账号不一致，已阻止采集");
+      if (!identity || !account.xhs_user_id) {
+        const content = await callMcpTool(
+          result.port,
+          "get_my_profile",
+          {},
+          90_000,
+        );
+        xhsProfile = JSON.parse(
+          content
+            .filter((item) => item.type === "text")
+            .map((item) => item.text || "")
+            .join("\n"),
+        );
+        if (!verifiedXhsProfile(xhsProfile, account))
+          throw new Error("个人主页身份与已绑定小红书号不匹配，已阻止采集");
+      }
     }
     const health = leased.claim_id === "__health__";
-    const claim = leased.claim_id && !health
-      ? await db
-          .prepare(
-            "SELECT id,title,body,published_url,external_content_id,status FROM claims WHERE id=? AND account_id=?",
-          )
-          .bind(leased.claim_id, leased.account_id)
-          .first<Row>()
-      : null;
+    const claim =
+      leased.claim_id && !health
+        ? await db
+            .prepare(
+              "SELECT id,title,body,published_url,external_content_id,status FROM claims WHERE id=? AND account_id=?",
+            )
+            .bind(leased.claim_id, leased.account_id)
+            .first<Row>()
+        : null;
     if (leased.claim_id && !health && (!claim || claim.status !== "published"))
       throw new Error("仅正式发布的作品可以采集，草稿不计入运营数据");
-    const response = await managerFetch("/operations/collect", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ account, claim, health }),
-    });
+    const profileValue = xhsProfile
+      ? xhsProfileMetrics(xhsProfile, claim, account, health)
+      : null;
+    const response = profileValue
+      ? Response.json(profileValue)
+      : await managerFetch("/operations/collect", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ account, claim, health }),
+        });
     const value = (await response.json()) as {
       error?: string;
       source?: string;

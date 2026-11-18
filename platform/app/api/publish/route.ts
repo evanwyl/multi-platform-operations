@@ -261,6 +261,8 @@ export async function POST(request: Request) {
         { error: "任务状态已变化，请刷新后重试" },
         { status: 409 },
       );
+    await db.prepare("UPDATE publication_plans SET status='canceled',completed_at=? WHERE claim_id=? AND status='pending'")
+      .bind(returnedAt, claim.id).run();
     await audit(
       user.id,
       "发布前退回修改",
