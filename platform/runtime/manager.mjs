@@ -44,6 +44,11 @@ import {
   renderWechatMarkdown,
   wechatThemes,
 } from "./platforms/wechat-markdown.mjs";
+import {
+  captureWechatArticle,
+  captureWechatArticleBatch,
+  openWechatArticleReader,
+} from "./platforms/wechat-article-browser.mjs";
 import { imaSettings, saveImaSettings, syncImaRecord, testImaSettings } from "./platforms/ima-openapi.mjs";
 
 const HOST = "127.0.0.1";
@@ -88,6 +93,7 @@ const analysisSchemas = {
   "trend-plan": resolve(appRoot, "runtime/trend-plan.schema.json"),
   "candidate-screen": resolve(appRoot, "runtime/candidate-screen.schema.json"),
   "topic-analysis": resolve(appRoot, "runtime/topic-analysis.schema.json"),
+  "remix-analysis": resolve(appRoot, "runtime/remix-analysis.schema.json"),
   "content-draft": resolve(appRoot, "runtime/content-draft.schema.json"),
   "douyin-image-draft": resolve(appRoot, "runtime/content-draft.schema.json"),
   "zhihu-article-draft": resolve(
@@ -1142,6 +1148,52 @@ const server = createServer(async (request, response) => {
           payload.style || {},
         ),
       });
+    }
+    if (
+      request.method === "POST" &&
+      url.pathname === "/wechat/article-reader/open"
+    ) {
+      const payload = await body(request);
+      return json(
+        response,
+        200,
+        await openWechatArticleReader(
+          platformAccountRoot,
+          appRoot,
+          payload.readerId,
+          payload.url,
+        ),
+      );
+    }
+    if (
+      request.method === "POST" &&
+      url.pathname === "/wechat/article-reader/capture"
+    ) {
+      const payload = await body(request);
+      return json(
+        response,
+        200,
+        await captureWechatArticle(
+          platformAccountRoot,
+          appRoot,
+          payload.readerId,
+        ),
+      );
+    }
+    if (
+      request.method === "POST" &&
+      url.pathname === "/wechat/article-reader/capture-batch"
+    ) {
+      const payload = await body(request);
+      return json(
+        response,
+        200,
+        await captureWechatArticleBatch(
+          platformAccountRoot,
+          appRoot,
+          payload.items,
+        ),
+      );
     }
     if (request.method === "GET" && url.pathname === "/publish-asset") {
       const assetPath = resolve(url.searchParams.get("path") || "");

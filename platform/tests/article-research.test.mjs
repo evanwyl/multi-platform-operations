@@ -63,6 +63,59 @@ test("strictly filters article pages and the selected publication time", async (
   assert.match(route, /sogou weixin/);
 });
 
+test("checks the actual WeChat search provider instead of local SearXNG", async () => {
+  const route = await source("app/api/article-research/route.ts");
+  const ui = await source("app/PlatformApp.tsx");
+  assert.match(route, /async function wechatSearchAvailable/);
+  assert.match(route, /fetch\("https:\/\/weixin\.sogou\.com\/"/);
+  assert.match(route, /platform === "wechat"\s*\? await wechatSearchAvailable\(\)\s*:\s*await searchServiceAvailable\(\)/s);
+  assert.match(route, /platform === "wechat" \? "https:\/\/weixin\.sogou\.com" : searchEndpoint\(\)/);
+  assert.match(ui, /可搜索公众号文章并抓取正文/);
+});
+
+test("keeps Sogou search cookies while resolving real WeChat article links", async () => {
+  const route = await source("app/api/article-research/route.ts");
+  assert.match(route, /function mergeSogouCookies/);
+  assert.match(route, /cookie = mergeSogouCookies\(cookie, response\)/);
+  assert.match(route, /let resultRows = 0/);
+  assert.match(route, /真实链接被访问验证拦截/);
+  assert.doesNotMatch(route, /ABTEST=7\|1716888919\|v1/);
+});
+
+test("reports WeChat body verification instead of pretending no articles exist", async () => {
+  const route = await source("app/api/article-research/route.ts");
+  const ui = await source("app/PlatformApp.tsx");
+  assert.match(route, /wappoc_appmsgcaptcha\|环境异常\|secitptpage\\\/verify/);
+  assert.match(route, /微信正文触发访问验证/);
+  assert.match(route, /已找到 \$\{candidates\} 条相关文章/);
+  assert.match(route, /未获得正文的文章不会进入选题库/);
+  assert.match(ui, /等待本地微信读取 \$\{result\.verification_required \|\| 0\} 篇/);
+});
+
+test("allows verification-blocked WeChat candidates to be completed by the local reader", async () => {
+  const route = await source("app/api/article-research/route.ts");
+  const manager = await source("runtime/manager.mjs");
+  const reader = await source("runtime/platforms/wechat-article-browser.mjs");
+  const ui = await source("app/PlatformApp.tsx");
+  assert.match(route, /processing = platform === "wechat"[\s\S]*"verification_required"/);
+  assert.match(route, /action === "open_wechat_reader"/);
+  assert.match(route, /action === "capture_wechat_reader"/);
+  assert.match(route, /action === "capture_wechat_reader_batch"/);
+  assert.match(manager, /\/wechat\/article-reader\/open/);
+  assert.match(manager, /\/wechat\/article-reader\/capture/);
+  assert.match(manager, /\/wechat\/article-reader\/capture-batch/);
+  assert.match(reader, /mp\.weixin\.qq\.com/);
+  assert.match(reader, /#js_content/);
+  assert.match(reader, /该内容已被发布者删除/);
+  assert.match(reader, /status: "unavailable"/);
+  assert.match(reader, /skipped\.push/);
+  assert.match(route, /processing_status='failed',detail_error=/);
+  assert.match(ui, /待微信读取/);
+  assert.match(ui, /自动读取本页/);
+  assert.match(ui, /系统会自动继续/);
+  assert.match(route, /: \["__wechat__", ""\]/);
+});
+
 test("supports selecting and bulk archiving Zhihu and WeChat article samples", async () => {
   const route = await source("app/api/article-research/route.ts"); const ui = await source("app/PlatformApp.tsx");
   assert.match(route, /action === "archive_bulk"/); assert.match(route, /status='archived'/); assert.match(route, /共享正文保留/);

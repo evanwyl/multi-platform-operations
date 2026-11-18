@@ -95,6 +95,34 @@ type Topic = {
   claim_owner_name?: string;
 };
 type ImagePrompt = { label: string; prompt: string };
+type RemixMode = "faithful" | "structure" | "theme";
+type RemixAnalysis = {
+  summary: string;
+  core_claims: string[];
+  logic_chain: string[];
+  fact_anchors: string[];
+  expression_hooks: string[];
+  risks: string[];
+};
+type RemixSource = {
+  feed_id: string;
+  title: string;
+  author_name: string;
+  source_url: string;
+  detail_text: string;
+  source_kind: "social" | "article";
+  liked_count: string;
+  collected_count: string;
+  comment_count: string;
+  shared_count: string;
+  heat_score: number;
+  published_at: string;
+  captured_at: string;
+  best_rank: number;
+  occurrence_count: number;
+  relevance_score: number;
+  trend_score: number;
+};
 type CreativeDraft = {
   title_options: string[];
   title: string;
@@ -102,6 +130,8 @@ type CreativeDraft = {
   tags: string[];
   image_prompts: ImagePrompt[];
   creative_note: string;
+  remix_mode?: RemixMode;
+  remix_analysis?: RemixAnalysis | null;
   video_options?: {
     mode?: "publish" | "draft";
   };
@@ -366,6 +396,7 @@ type ArticleResearchData = {
   configured: boolean;
   endpoint: string;
   samples: ArticleSample[];
+  pending_samples: ArticleSample[];
   accounts: Account[];
 };
 type AuthData = { initialized: boolean; user: User | null };
@@ -428,13 +459,24 @@ const sampleCaptureOutcome: Record<string, string> = {
   duplicate: "已存在/重复",
 };
 
+class RequestError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "RequestError";
+    this.status = status;
+  }
+}
+
 async function jsonRequest<T = Record<string, unknown>>(
   url: string,
   options?: RequestInit,
 ): Promise<T> {
   const response = await fetch(url, options);
   const data = (await response.json()) as T & { error?: string };
-  if (!response.ok) throw new Error(data.error || "操作失败");
+  if (!response.ok)
+    throw new RequestError(data.error || "操作失败", response.status);
   return data as T;
 }
 
@@ -577,6 +619,8 @@ function blankCreative(claim?: Claim): CreativeDraft {
     tags: Array.isArray(saved?.tags) ? saved.tags : (claim?.tags ?? []),
     image_prompts: currentPrompts.slice(0, 6),
     creative_note: saved?.creative_note ?? "",
+    remix_mode: saved?.remix_mode ?? "faithful",
+    remix_analysis: saved?.remix_analysis ?? null,
     video_options: saved?.video_options ?? { mode: "publish" },
   };
   return isZhihuClaim(claim) || isVideoClaim(claim)
@@ -721,7 +765,10 @@ export default function PlatformApp() {
     await loadAuth();
   }
 
-  async function action(payload: Record<string, unknown>, success: string) {
+  async function action(
+    payload: Record<string, unknown>,
+    success: string,
+  ): Promise<boolean> {
     setBusy(true);
     setMessage("");
     try {
@@ -732,8 +779,16 @@ export default function PlatformApp() {
       });
       await loadData();
       setMessage(success);
+      return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "操作失败");
+      if (error instanceof RequestError && error.status === 401) {
+        setData(null);
+        await loadAuth().catch(() => setAuth(null));
+        setMessage("登录已过期，请重新登录后继续");
+      } else {
+        setMessage(error instanceof Error ? error.message : "操作失败");
+      }
+      return false;
     } finally {
       setBusy(false);
     }
@@ -2224,6 +2279,7 @@ function ArticleResearch({
   const [topicTitle, setTopicTitle] = useState("");
   const [selectedArticles, setSelectedArticles] = useState<string[]>([]);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [pendingPage, setPendingPage] = useState(1);
 
   function toggleDomain(
     domain: string,
@@ -2266,6 +2322,8 @@ function ArticleResearch({
         candidates: number;
         rejected_pages: number;
         rejected_by_time: number;
+        body_failures?: number;
+        verification_required?: number;
         errors?: string[];
       }>("/api/article-research", {
         method: "POST",
@@ -2280,12 +2338,46 @@ function ArticleResearch({
       });
       await load();
       notify(
-        `搜索候选 ${result.candidates} 条，排除非文章 ${result.rejected_pages} 条、时间不符或日期缺失 ${result.rejected_by_time} 条，最终返回 ${result.discovered} 篇正文${result.errors?.length ? `；${result.errors.length} 个关键词搜索异常` : ""}`,
+        `搜索候选 ${result.candidates} 条，正文成功 ${result.discovered} 篇，等待本地微信读取 ${result.verification_required || 0} 篇${result.errors?.length ? `；${result.errors.length} 个关键词搜索异常` : ""}`,
       );
     } catch (error) {
       notify(error instanceof Error ? error.message : "文章搜索失败");
     } finally {
       setSearching(false);
+    }
+  }
+
+  async function batchWechatReader(samples: ArticleSample[]) {
+    if (!samples.length) return;
+    setWorkingId("reader-batch");
+    notify(
+      `正在自动读取 ${samples.length} 篇公众号正文；如弹出微信验证，只需在窗口中完成验证，系统会自动继续`,
+    );
+    try {
+      const result = await jsonRequest<{
+        completed: number;
+        requested: number;
+        skipped: number;
+        verification_required: boolean;
+      }>("/api/article-research", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "capture_wechat_reader_batch",
+          platform: "wechat",
+          sample_ids: samples.map((sample) => sample.id),
+        }),
+      });
+      await load();
+      notify(
+        result.verification_required
+          ? `本批成功读取 ${result.completed} 篇、自动跳过 ${result.skipped || 0} 篇，仍有文章需要微信验证；完成验证后可继续`
+          : `本批处理完成：成功读取 ${result.completed} 篇，自动跳过 ${result.skipped || 0} 篇失效文章`,
+      );
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "批量读取公众号正文失败");
+    } finally {
+      setWorkingId("");
     }
   }
 
@@ -2357,6 +2449,12 @@ function ArticleResearch({
       </div>
     );
   const visible = data.samples.filter((sample) => sample.status !== "used");
+  const pendingPageCount = Math.max(1, Math.ceil(data.pending_samples.length / 10));
+  const safePendingPage = Math.min(pendingPage, pendingPageCount);
+  const visiblePending = data.pending_samples.slice(
+    (safePendingPage - 1) * 10,
+    safePendingPage * 10,
+  );
   const allVisibleSelected =
     Boolean(visible.length) &&
     visible.every((sample) => selectedArticles.includes(sample.id));
@@ -2383,8 +2481,12 @@ function ArticleResearch({
             </strong>
             <span>
               {data.configured
-                ? "可搜索全网文章并抓取正文"
-                : "请检查本机搜索服务"}
+                ? platform === "wechat"
+                  ? "可搜索公众号文章并抓取正文"
+                  : "可搜索全网文章并抓取正文"
+                : platform === "wechat"
+                  ? "请检查搜狗微信搜索网络"
+                  : "请检查本机搜索服务"}
             </span>
           </div>
         </div>
@@ -2470,6 +2572,49 @@ function ArticleResearch({
           </small>
         </div>
       </section>
+      {platform === "wechat" && data.pending_samples.length ? (
+        <section className="panel article-results article-reader-queue">
+          <div className="panel-head">
+            <div>
+              <h2>待微信读取</h2>
+              <p>
+                {data.pending_samples.length} 篇文章触发了微信访问验证；完成本地验证后才会进入选题库。
+              </p>
+            </div>
+            <div className="article-reader-batch-actions">
+              <button
+                className="primary"
+                disabled={Boolean(workingId) || !visiblePending.length}
+                onClick={() => batchWechatReader(visiblePending)}
+              >
+                {workingId === "reader-batch"
+                  ? "正在自动读取…"
+                  : `自动读取本页 ${visiblePending.length} 篇`}
+              </button>
+            </div>
+          </div>
+          <div className="article-reader-list">
+            {visiblePending.map((sample) => (
+              <article key={sample.id}>
+                <div>
+                  <strong>{sample.title}</strong>
+                  <span>
+                    {sample.author_name || "公众号文章"} · {sample.detail_error}
+                  </span>
+                </div>
+                <a href={sample.source_url} target="_blank" rel="noreferrer">
+                  查看链接
+                </a>
+              </article>
+            ))}
+          </div>
+          <Pagination
+            page={safePendingPage}
+            totalItems={data.pending_samples.length}
+            onChange={setPendingPage}
+          />
+        </section>
+      ) : null}
       <section className="panel article-results">
         <div className="panel-head">
           <div>
@@ -3873,7 +4018,10 @@ function Topics({
 }: {
   platform: PlatformId;
   data: AppData;
-  action: (payload: Record<string, unknown>, success: string) => void;
+  action: (
+    payload: Record<string, unknown>,
+    success: string,
+  ) => Promise<boolean>;
   busy: boolean;
   focusedTopicId?: string;
 }) {
@@ -4126,9 +4274,9 @@ function Topics({
             <h2>{topicCopy.newTitle}</h2>
           </div>
           <form
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
-              action(
+              const created = await action(
                 {
                   action: "create_topic",
                   title,
@@ -4139,8 +4287,10 @@ function Topics({
                 },
                 `${platformLabel(platform)}选题已创建`,
               );
-              setTitle("");
-              setUrl("");
+              if (created) {
+                setTitle("");
+                setUrl("");
+              }
             }}
           >
             <input
@@ -4309,6 +4459,15 @@ function Topics({
                       <strong>{topic.claim_owner_name || "未认领"}</strong>
                     </div>
                   </div>
+                  {topic.note_id ? (
+                    <div className="topic-post-metrics" aria-label="来源帖子数据">
+                      <span><b>{topic.liked_count || "0"}</b>点赞</span>
+                      <span><b>{topic.collected_count || "0"}</b>收藏</span>
+                      <span><b>{topic.comment_count || "0"}</b>评论</span>
+                      <span><b>{topic.heat_score || 0}</b>热度分</span>
+                      <span><b>{topic.note_published_at ? dateTime(topic.note_published_at) : "未提供"}</b>发布时间</span>
+                    </div>
+                  ) : null}
                   <div className="topic-breakdown">
                     <div className="topic-summary">
                       <span>{isZhihu ? "主题说明" : "内容摘要"}</span>
@@ -4602,7 +4761,10 @@ function Content({
   initialAccountId,
 }: {
   data: AppData;
-  action: (payload: Record<string, unknown>, success: string) => void;
+  action: (
+    payload: Record<string, unknown>,
+    success: string,
+  ) => Promise<boolean>;
   busy: boolean;
   reload: () => Promise<void>;
   notify: (message: string) => void;
@@ -4637,6 +4799,14 @@ function Content({
   const [instruction, setInstruction] = useState("");
   const [creating, setCreating] = useState(false);
   const [creationSeconds, setCreationSeconds] = useState(0);
+  const [remixStage, setRemixStage] = useState<
+    "source" | "analysis" | "workbench"
+  >("source");
+  const [remixSources, setRemixSources] = useState<RemixSource[]>([]);
+  const [loadingRemixContext, setLoadingRemixContext] = useState(
+    Boolean(initialTarget && !isVideoClaim(initialTarget)),
+  );
+  const [analyzingRemix, setAnalyzingRemix] = useState(false);
   const [saving, setSaving] = useState(false);
   const [coverGenerating, setCoverGenerating] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
@@ -4672,6 +4842,9 @@ function Content({
     setCreative(blankCreative(claim));
     setVersions([]);
     setShowVersions(false);
+    setRemixSources([]);
+    setLoadingRemixContext(!isVideoClaim(claim));
+    setRemixStage(isVideoClaim(claim) ? "workbench" : "source");
     setContentLevel("editor");
   }
 
@@ -4683,8 +4856,33 @@ function Content({
     setCreative(blankCreative());
     setVersions([]);
     setShowVersions(false);
+    setRemixSources([]);
+    setLoadingRemixContext(false);
+    setRemixStage("source");
     setContentLevel("list");
   }
+
+  useEffect(() => {
+    if (!selected?.id || isVideoClaim(selected)) return;
+    let cancelled = false;
+    void jsonRequest<{
+      sources?: RemixSource[];
+    }>("/api/creation?id=" + encodeURIComponent(selected.id))
+      .then((result) => {
+        if (cancelled) return;
+        setRemixSources(Array.isArray(result.sources) ? result.sources : []);
+      })
+      .catch((error) => {
+        if (!cancelled)
+          notify(error instanceof Error ? error.message : "无法读取二创来源");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingRemixContext(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [notify, selected]);
 
   async function creationRequest(
     payload: Record<string, unknown>,
@@ -4694,10 +4892,19 @@ function Content({
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: selected?.id, ...payload }),
-    })) as { creative: CreativeDraft; version: number };
+    })) as {
+      creative: CreativeDraft;
+      version: number;
+      sources?: RemixSource[];
+    };
     setCreative(result.creative);
+    if (result.sources) setRemixSources(result.sources);
     await reload();
-    notify(success + "，当前为 v" + result.version);
+    notify(
+      result.version
+        ? `${success}，当前为 v${result.version}`
+        : `${success}，拆解结果已保存`,
+    );
     return result;
   }
 
@@ -4716,7 +4923,11 @@ function Content({
     );
     try {
       await creationRequest(
-        { action: "generate", instruction },
+        {
+          action: "generate",
+          instruction,
+          remix_mode: creative.remix_mode || "faithful",
+        },
         zhihuArticle
           ? "知乎专栏文章已生成"
           : wechatArticle
@@ -4731,13 +4942,50 @@ function Content({
     }
   }
 
+  async function analyzeForRemix() {
+    if (!selected || !editable || !remixSources.length) return;
+    setAnalyzingRemix(true);
+    try {
+      await creationRequest(
+        { action: "analyze_remix" },
+        "来源正文已完成拆解",
+      );
+      setRemixStage("analysis");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "AI 拆解失败");
+    } finally {
+      setAnalyzingRemix(false);
+    }
+  }
+
   async function generateWechatCoverPrompt() {
-    if (!selected || !editable || !creative.title || !creative.body) return;
+    if (
+      !selected ||
+      !canOperate ||
+      !creative.title ||
+      !creative.body ||
+      !["writing", "revision", "review"].includes(selected.status)
+    )
+      return;
+    const reopenReview = selected.status === "review";
+    if (
+      reopenReview &&
+      !window.confirm(
+        "这篇内容已经提交审核。继续生成封面提示词会撤回本次审核，生成后需要重新选择排版并提交审核。是否继续？",
+      )
+    )
+      return;
     setCoverGenerating(true);
     try {
       await creationRequest(
-        { action: "generate_cover_prompt", creative },
-        "公众号封面提示词已生成",
+        {
+          action: "generate_cover_prompt",
+          creative,
+          reopen_review: reopenReview,
+        },
+        reopenReview
+          ? "已撤回审核并生成公众号封面提示词"
+          : "公众号封面提示词已生成",
       );
     } catch (error) {
       notify(
@@ -5279,6 +5527,130 @@ function Content({
             </div>
           ) : null}
           {!videoContent ? (
+            <nav className="remix-flow" aria-label="AI 二创流程">
+              {[
+                ["source", "01", "原始内容", remixSources.length ? `${remixSources.length} 条来源` : "等待来源"],
+                ["analysis", "02", "AI 拆解", creative.remix_analysis ? "已完成" : "待拆解"],
+                ["workbench", "03", "二创工作台", creative.body ? "已有草稿" : "待创作"],
+              ].map(([stage, index, label, state]) => (
+                <button
+                  type="button"
+                  key={stage}
+                  className={remixStage === stage ? "active" : ""}
+                  onClick={() => setRemixStage(stage as typeof remixStage)}
+                >
+                  <b>{index}</b>
+                  <span><strong>{label}</strong><small>{state}</small></span>
+                </button>
+              ))}
+            </nav>
+          ) : null}
+          {!videoContent && remixStage === "source" ? (
+            <section className="panel remix-source-stage">
+              <header className="remix-stage-head">
+                <div>
+                  <span className="section-kicker">第一步 · 确认创作依据</span>
+                  <h2>先读原文，再决定如何二创</h2>
+                  <p>这里只展示实际抓取成功的正文。没有正文时，平台不会假装基于原文改写。</p>
+                </div>
+                {remixSources.length ? (
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={!editable || analyzingRemix}
+                    onClick={analyzeForRemix}
+                  >
+                    {analyzingRemix ? "正在拆解…" : creative.remix_analysis ? "重新拆解原文" : "AI 拆解原文"}
+                  </button>
+                ) : null}
+              </header>
+              {loadingRemixContext ? (
+                <div className="remix-loading" role="status">正在读取来源正文…</div>
+              ) : remixSources.length ? (
+                <div className="remix-source-list">
+                  {remixSources.map((source, index) => (
+                    <article key={source.feed_id} className={index === 0 ? "primary-source" : ""}>
+                      <div className="remix-source-meta">
+                        <span>{index === 0 ? "主稿" : "核验来源"}</span>
+                        <small>{source.author_name || "来源作者未记录"}</small>
+                        {source.source_url ? <a href={source.source_url} target="_blank" rel="noreferrer">查看原文 ↗</a> : null}
+                      </div>
+                      <h3>{source.title || selected.topic_title}</h3>
+                      <div className="remix-source-metrics" aria-label="来源内容数据">
+                        {source.source_kind === "social" ? (
+                          <>
+                            <span><b>{source.liked_count || "0"}</b>点赞</span>
+                            <span><b>{source.collected_count || "0"}</b>收藏</span>
+                            <span><b>{source.comment_count || "0"}</b>评论</span>
+                            {source.shared_count ? <span><b>{source.shared_count}</b>分享</span> : null}
+                            <span><b>{source.heat_score || 0}</b>热度分</span>
+                          </>
+                        ) : (
+                          <>
+                            <span><b>{source.best_rank || "—"}</b>搜索排名</span>
+                            <span><b>{source.occurrence_count || 1}</b>检索出现</span>
+                            <span><b>{source.relevance_score || 0}</b>相关度</span>
+                            <span><b>{source.trend_score || 0}</b>趋势分</span>
+                          </>
+                        )}
+                        <span><b>{source.published_at ? dateTime(source.published_at) : "未提供"}</b>发布时间</span>
+                        <span><b>{source.captured_at ? dateTime(source.captured_at) : "未记录"}</b>抓取时间</span>
+                      </div>
+                      <div className="remix-source-copy">{source.detail_text}</div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="remix-empty-source">
+                  <strong>当前选题没有抓取成功的正文</strong>
+                  <p>可以返回选题中心补充来源；也可以进入工作台做无来源原创，但系统不会把它标记成原文改写。</p>
+                  <button type="button" className="outline" onClick={() => setRemixStage("workbench")}>进入原创工作台</button>
+                </div>
+              )}
+            </section>
+          ) : null}
+          {!videoContent && remixStage === "analysis" ? (
+            <section className="panel remix-analysis-stage">
+              <header className="remix-stage-head">
+                <div>
+                  <span className="section-kicker">第二步 · 看清结构与边界</span>
+                  <h2>AI 拆解不是改稿，而是建立二创依据</h2>
+                  <p>核心观点、逻辑顺序和事实锚点用于防止二创时虚构内容。</p>
+                </div>
+                <div className="remix-stage-actions">
+                  {remixSources.length ? <button type="button" className="outline" disabled={!editable || analyzingRemix} onClick={analyzeForRemix}>{analyzingRemix ? "拆解中…" : "重新拆解"}</button> : null}
+                  <button type="button" className="primary" onClick={() => setRemixStage("workbench")}>进入二创工作台</button>
+                </div>
+              </header>
+              {creative.remix_analysis ? (
+                <div className="remix-analysis-grid">
+                  <article className="remix-analysis-summary">
+                    <span>内容摘要</span>
+                    <p>{creative.remix_analysis.summary}</p>
+                  </article>
+                  {[
+                    ["核心观点", creative.remix_analysis.core_claims],
+                    ["原文逻辑", creative.remix_analysis.logic_chain],
+                    ["事实锚点", creative.remix_analysis.fact_anchors],
+                    ["表达钩子", creative.remix_analysis.expression_hooks],
+                    ["改写风险", creative.remix_analysis.risks],
+                  ].map(([label, items]) => (
+                    <article key={label as string}>
+                      <span>{label as string}</span>
+                      {(items as string[]).length ? <ol>{(items as string[]).map((item, index) => <li key={`${label}-${index}`}>{item}</li>)}</ol> : <p>原文未发现明确内容</p>}
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="remix-empty-source">
+                  <strong>还没有拆解结果</strong>
+                  <p>{remixSources.length ? "点击“AI 拆解原文”，生成可追溯的二创依据。" : "当前没有来源正文，可以直接进入原创工作台。"}</p>
+                  {remixSources.length ? <button type="button" className="primary" disabled={!editable || analyzingRemix} onClick={analyzeForRemix}>{analyzingRemix ? "正在拆解…" : "AI 拆解原文"}</button> : null}
+                </div>
+              )}
+            </section>
+          ) : null}
+          {!videoContent && remixStage === "workbench" ? (
             <section className="creative-command">
               <div>
                 <span className="section-kicker">
@@ -5296,6 +5668,26 @@ function Content({
                       : `由${selectedPlatformName}文章编辑完成长文初稿，再经过 Humanizer 去除模板化表达。`
                     : `由${selectedPlatformName}内容编辑生成标题、正文、标签和整篇配图提示词；切换功能页不会中断。`}
                 </p>
+              </div>
+              <div className="remix-mode-picker" aria-label="选择二创模式">
+                {remixSources.length ? (
+                  [
+                    ["faithful", "保真换话术", "不改逻辑与事实，只改变平台话术"],
+                    ["structure", "结构复用", "沿用推进结构，重新组织表达"],
+                    ["theme", "主题再创作", "围绕同一主题换角度，事实仍需可追溯"],
+                  ].map(([mode, label, note]) => (
+                    <button
+                      type="button"
+                      key={mode}
+                      className={(creative.remix_mode || "faithful") === mode ? "active" : ""}
+                      onClick={() => setCreative({ ...creative, remix_mode: mode as RemixMode })}
+                    >
+                      <strong>{label}</strong><span>{note}</span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="remix-original-mode"><strong>无来源原创</strong><span>只依据选题信息创作，不假装引用原文事实</span></div>
+                )}
               </div>
               <div className="creative-command-row">
                 <input
@@ -5346,7 +5738,7 @@ function Content({
                 </div>
               ) : null}
             </section>
-          ) : (
+          ) : videoContent ? (
             <section className="creative-command video-publish-intro">
               <div>
                 <span className="section-kicker">
@@ -5376,9 +5768,9 @@ function Content({
                 </div>
               </div>
             </section>
-          )}
+          ) : null}
 
-          <section
+          {remixStage === "workbench" || videoContent ? <section
             className={`panel creative-editor ${
               imageContent || videoContent ? "creator-studio-editor" : ""
             }`}
@@ -5797,10 +6189,10 @@ function Content({
                       : "保存图文并提交审核"}
               </button>
             </div>
-          </section>
+          </section> : null}
         </section>
 
-        {!longArticle && !videoContent ? (
+        {!longArticle && !videoContent && remixStage === "workbench" ? (
           <aside className="panel visual-builder post-image-prompts">
             <div className="visual-builder-head">
               <div>
@@ -5818,17 +6210,23 @@ function Content({
                   <button
                     className="primary"
                     disabled={
-                      !editable ||
+                      !canOperate ||
                       creating ||
                       saving ||
                       coverGenerating ||
                       !creative.title ||
-                      !creative.body
+                      !creative.body ||
+                      !selected ||
+                      !["writing", "revision", "review"].includes(
+                        selected.status,
+                      )
                     }
                     onClick={generateWechatCoverPrompt}
                   >
                     {coverGenerating
                       ? "正在生成封面…"
+                      : selected?.status === "review"
+                        ? "撤回审核并生成提示词"
                       : creative.image_prompts.some((item) =>
                             /封面|主视觉/.test(item.label),
                           )
@@ -5846,7 +6244,7 @@ function Content({
             <p className="post-prompts-intro">
               AI 根据完整标题和正文推荐一组独立成品图。
               {wechatArticle
-                ? "第一张用于公众号封面，其余图片可插入正文；每条提示词都描述一张完整成品图。"
+                ? "这里生成的是可交给图片模型使用的制作提示词，不会直接生成图片；生成成品图后请在左侧“文章素材”上传，首张作为封面。"
                 : "每条提示词都描述整张图片，不是背景图、卡片模板或留字底图。"}
             </p>
             {creative.image_prompts.length ? (
@@ -6078,7 +6476,10 @@ function Review({
   notify,
 }: {
   data: AppData;
-  action: (payload: Record<string, unknown>, success: string) => void;
+  action: (
+    payload: Record<string, unknown>,
+    success: string,
+  ) => Promise<boolean>;
   busy: boolean;
   notify: (message: string) => void;
 }) {
@@ -6912,7 +7313,10 @@ function Accounts({
 }: {
   platform: PlatformId;
   data: AppData;
-  action: (payload: Record<string, unknown>, success: string) => void;
+  action: (
+    payload: Record<string, unknown>,
+    success: string,
+  ) => Promise<boolean>;
   busy: boolean;
   reload: () => Promise<void>;
   notify: (message: string) => void;
@@ -7799,7 +8203,10 @@ function Settings({
   busy,
 }: {
   data: AppData;
-  action: (payload: Record<string, unknown>, success: string) => void;
+  action: (
+    payload: Record<string, unknown>,
+    success: string,
+  ) => Promise<boolean>;
   busy: boolean;
 }) {
   const [adding, setAdding] = useState(false);

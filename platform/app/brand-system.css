@@ -479,6 +479,320 @@ a:focus-visible {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.remix-flow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.remix-flow button {
+  display: flex;
+  min-height: 68px;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 16px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease;
+}
+
+.remix-flow button:last-child {
+  border-right: 0;
+}
+
+.remix-flow button:hover,
+.remix-flow button.active {
+  background: #f1f6ff;
+  color: var(--brand-navy);
+}
+
+.remix-flow button.active {
+  box-shadow: inset 0 -3px 0 var(--brand-primary);
+}
+
+.remix-flow b {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border: 1px solid #cbd7e4;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--brand-action);
+  font-size: 10px;
+}
+
+.remix-flow span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.remix-flow strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.remix-flow small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.remix-source-stage,
+.remix-analysis-stage {
+  padding: 24px;
+}
+
+.remix-stage-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.remix-stage-head h2 {
+  margin: 7px 0 6px;
+  color: var(--ink);
+  font-size: 19px;
+}
+
+.remix-stage-head p {
+  max-width: 68ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.65;
+}
+
+.remix-stage-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.remix-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.remix-source-list article {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fafbfc;
+}
+
+.remix-source-list article.primary-source {
+  border-color: #b8cce0;
+  background: #f7fbff;
+}
+
+.remix-source-meta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.remix-source-meta span {
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: #e8f2ff;
+  color: var(--brand-action);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.remix-source-meta small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.remix-source-meta a {
+  margin-left: auto;
+  color: var(--brand-action);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.remix-source-list h3 {
+  margin: 13px 0 10px;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.remix-source-metrics,
+.topic-post-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.remix-source-metrics span,
+.topic-post-metrics span {
+  display: flex;
+  min-height: 38px;
+  min-width: 74px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 1px solid #dfe7ee;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.remix-source-metrics b,
+.topic-post-metrics b {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.topic-post-metrics {
+  margin: 12px 0 0;
+}
+
+.topic-post-metrics span {
+  background: #f8fafc;
+}
+
+.remix-source-copy {
+  overflow: auto;
+  max-height: 380px;
+  padding: 14px 16px;
+  border: 1px solid #e4e9ee;
+  border-radius: 9px;
+  background: #fff;
+  color: #394452;
+  font-size: 11px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+}
+
+.remix-loading,
+.remix-empty-source {
+  margin-top: 18px;
+  padding: 48px 24px;
+  border: 1px dashed #cbd5df;
+  border-radius: 12px;
+  background: #fafbfc;
+  color: var(--muted);
+  text-align: center;
+}
+
+.remix-empty-source strong {
+  display: block;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.remix-empty-source p {
+  margin: 8px auto 16px;
+  max-width: 60ch;
+  font-size: 10px;
+  line-height: 1.7;
+}
+
+.remix-analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.remix-analysis-grid article {
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfcfd;
+}
+
+.remix-analysis-grid article.remix-analysis-summary {
+  grid-column: 1 / -1;
+  background: #f4f8ff;
+}
+
+.remix-analysis-grid article > span {
+  color: var(--brand-action);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.remix-analysis-grid p,
+.remix-analysis-grid ol {
+  margin: 10px 0 0;
+  color: #3c4652;
+  font-size: 10px;
+  line-height: 1.75;
+}
+
+.remix-analysis-grid ol {
+  padding-left: 20px;
+}
+
+.remix-analysis-grid li + li {
+  margin-top: 6px;
+}
+
+.remix-mode-picker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 17px;
+}
+
+.remix-mode-picker button,
+.remix-original-mode {
+  display: flex;
+  min-height: 62px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 12px;
+  border: 1px solid rgb(255 255 255 / 28%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 10%);
+  color: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.remix-mode-picker button:hover,
+.remix-mode-picker button.active {
+  border-color: #fff;
+  background: #fff;
+  color: var(--brand-action);
+}
+
+.remix-mode-picker strong,
+.remix-original-mode strong {
+  font-size: 10px;
+}
+
+.remix-mode-picker span,
+.remix-original-mode span {
+  color: inherit;
+  font-size: 8px;
+  line-height: 1.45;
+  opacity: 0.8;
+}
+
 .image-creator-shell .post-image-prompts {
   position: static;
   grid-column: 1;
@@ -724,6 +1038,18 @@ a:focus-visible {
 }
 
 @media (max-width: 920px) {
+  .remix-stage-head {
+    flex-direction: column;
+  }
+
+  .remix-analysis-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .remix-mode-picker {
+    grid-template-columns: 1fr;
+  }
+
   .creator-studio-strip {
     align-items: flex-start;
     flex-direction: column;
@@ -740,6 +1066,24 @@ a:focus-visible {
 }
 
 @media (max-width: 620px) {
+  .remix-flow {
+    grid-template-columns: 1fr;
+  }
+
+  .remix-flow button {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .remix-flow button:last-child {
+    border-bottom: 0;
+  }
+
+  .remix-stage-actions {
+    width: 100%;
+    flex-direction: column;
+  }
+
   .creator-studio-strip ol {
     align-items: flex-start;
     flex-direction: column;

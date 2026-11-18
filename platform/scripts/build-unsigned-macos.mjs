@@ -198,6 +198,7 @@ for (const schema of [
   "trend-plan.schema.json",
   "candidate-screen.schema.json",
   "topic-analysis.schema.json",
+  "remix-analysis.schema.json",
   "content-draft.schema.json",
   "zhihu-article-draft.schema.json",
   "wechat-cover-prompt.schema.json",

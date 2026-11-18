@@ -90,6 +90,10 @@ test("公众号创作使用独立长文提示词和平台化界面", () => {
   assert.match(ui, /官方草稿接口必须有一张封面/);
   assert.match(ui, /正文配图可选；当前缺少公众号接口必需的封面/);
   assert.match(ui, /生成封面提示词/);
+  assert.match(ui, /撤回审核并生成提示词/);
+  assert.match(ui, /这里生成的是可交给图片模型使用的制作提示词/);
+  assert.match(creation, /reopenReviewForCover/);
+  assert.match(creation, /撤回审核并补充公众号封面提示词/);
   assert.match(ui, /generateWechatCoverPrompt/);
   assert.match(creation, /action === "generate_cover_prompt"/);
   assert.match(creation, /wechat-cover-prompt/);

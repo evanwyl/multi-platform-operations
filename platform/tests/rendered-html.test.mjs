@@ -965,3 +965,15 @@ test("builds trend research records around text, metrics, and per-sample analysi
   assert.match(schema, /information_density_score/);
   assert.match(schema, /remix_value_score/);
 });
+
+test("keeps manual topic input when creation fails and handles expired sessions", async () => {
+  const source = await readFile(
+    new URL("../app/PlatformApp.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /class RequestError extends Error/);
+  assert.match(source, /error instanceof RequestError && error\.status === 401/);
+  assert.match(source, /登录已过期，请重新登录后继续/);
+  assert.match(source, /const created = await action\(/);
+  assert.match(source, /if \(created\) \{\s*setTitle\(""\);\s*setUrl\(""\);/s);
+});
