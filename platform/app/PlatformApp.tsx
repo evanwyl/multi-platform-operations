@@ -25,6 +25,8 @@ import {
   UsersThree,
   type Icon,
 } from "@phosphor-icons/react";
+import OperationsCenter from "./OperationsCenter";
+import "./operations.css";
 
 type User = {
   id: string;
@@ -133,7 +135,8 @@ type CreativeDraft = {
   remix_mode?: RemixMode;
   remix_analysis?: RemixAnalysis | null;
   video_options?: {
-    mode?: "publish" | "draft";
+    mode?: "publish" | "draft" | "manual";
+    schedule_at?: string;
   };
 };
 type MediaAsset = {
@@ -243,7 +246,7 @@ type Claim = {
     wechat_style?: Partial<WechatStyle>;
     media_assets?: MediaAsset[];
     creative?: {
-      video_options?: { mode?: "publish" | "draft" };
+      video_options?: { mode?: "publish" | "draft" | "manual"; schedule_at?: string };
     };
   } | null;
 };
@@ -631,7 +634,7 @@ function blankCreative(claim?: Claim): CreativeDraft {
 export default function PlatformApp() {
   const [auth, setAuth] = useState<AuthData | null>(null);
   const [data, setData] = useState<AppData | null>(null);
-  const [view, setView] = useState("flow-content");
+  const [view, setView] = useState("operations");
   const [contentTargetId, setContentTargetId] = useState("");
   const [focusedTopicId, setFocusedTopicId] = useState("");
   const [contentAccountId, setContentAccountId] = useState("");
@@ -936,6 +939,7 @@ export default function PlatformApp() {
           </div>
         </div>
         <nav aria-label="主要导航">
+          <button className={`nav-item ${view === "operations" ? "active" : ""}`} aria-current={view === "operations" ? "page" : undefined} onClick={() => setView("operations")}><TrendUp size={18} aria-hidden="true" />运营总览</button>
           <div className="nav-group operations-summary-nav">
             <span className="nav-group-label">运营流程</span>
             {[
@@ -1284,6 +1288,7 @@ export default function PlatformApp() {
           </div>
         ) : null}
         <div className="workspace-content">
+          {view === "operations" ? <OperationsCenter accounts={data.accounts} claims={data.claims} roles={data.user.roles} notify={setMessage} openClaim={(id) => { const claim = data.claims.find((item) => item.id === id); if (claim) openDashboardClaim(claim); }} /> : null}
           {view === "dashboard" && (
             <Dashboard
               data={data}
@@ -6034,13 +6039,15 @@ function Content({
                           setCreative({
                             ...creative,
                             video_options: {
-                              mode: event.target.value as "publish" | "draft",
+                              ...creative.video_options,
+                              mode: event.target.value as "publish" | "draft" | "manual",
                             },
                           })
                         }
                       >
                         <option value="publish">审核后直接发布</option>
                         <option value="draft">保存到平台草稿</option>
+                        <option value="manual">自动填写，最终由我确认发布</option>
                       </select>
                     </label>
                   ) : (
@@ -6049,6 +6056,7 @@ function Content({
                       <span>当前小红书 MCP 视频通道不提供保存草稿模式。</span>
                     </div>
                   )}
+                  {selected.account_platform === "douyin" || selected.account_platform === "wechat_channels" ? <label>定时发布时间（选填）<input type="datetime-local" value={(creative.video_options?.schedule_at || "").slice(0, 16)} disabled={!editable || creative.video_options?.mode === "draft"} onChange={(event) => setCreative({ ...creative, video_options: { ...creative.video_options, schedule_at: event.target.value ? `${event.target.value}:00+08:00` : "" } })} /><small>审核通过并执行发布后，由平台按中国标准时间发布。</small></label> : null}
                 </section>
               ) : !longArticle ? (
                 <section className="review-image-uploader creator-media-workbench">
@@ -6883,7 +6891,9 @@ function Publish({
       });
       await reload();
       notify(
-        isWechatClaim(claim)
+        result.status === "awaiting_user"
+          ? "审核内容已填写，请在浏览器中确认发布；随后到运营总览的内容档案核验结果"
+          : isWechatClaim(claim)
           ? "内容已写入公众号草稿箱并回读核验"
           : result.status === "drafted"
             ? `内容已保存到${platform}草稿`

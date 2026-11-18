@@ -6,6 +6,7 @@ import { chromium } from "playwright-core";
 // Browser workflow patterns and selector fallbacks are adapted from
 // dreammis/social-auto-upload (MIT). See THIRD_PARTY_NOTICES.md.
 const sessions = new Map();
+const metricAccounts = new Set();
 const definitions = {
   douyin: {
     label: "抖音",
@@ -56,7 +57,7 @@ function findExecutable(root, names) {
   return "";
 }
 
-function browserExecutables(appRoot) {
+export function browserExecutables(appRoot) {
   const configured = String(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || "").trim();
   const bundled = resolve(appRoot, "runtime/bin/chromium/Chromium.app/Contents/MacOS/Chromium");
   const windowsBundled = process.platform === "win32"
@@ -216,7 +217,7 @@ async function uploadDouyin(page, payload) {
   const submitLabel = payload.mode === "draft" ? "保存草稿" : "发布";
   const submit = await visibleLocator(page, [`button:text-is('${submitLabel}')`, `button:has-text('${submitLabel}')`], 120_000);
   if (!submit || await submit.isDisabled().catch(() => true)) throw new Error(`抖音“${submitLabel}”按钮尚不可用，请检查视频处理和必填项`);
-  await submit.click();
+  if (payload.mode !== "manual") await submit.click();
   return submitLabel;
 }
 
@@ -255,7 +256,7 @@ async function uploadDouyinImages(page, payload) {
   const submitLabel = payload.mode === "draft" ? "保存草稿" : "发布";
   const submit = await visibleLocator(page, [`button:text-is('${submitLabel}')`, `button:has-text('${submitLabel}')`], 120_000);
   if (!submit || await submit.isDisabled().catch(() => true)) throw new Error(`抖音“${submitLabel}”按钮尚不可用，请检查图片和必填项`);
-  await submit.click();
+  if (payload.mode !== "manual") await submit.click();
   return submitLabel;
 }
 
@@ -297,11 +298,14 @@ async function uploadWechatChannels(page, payload) {
     const schedule = await visibleLocator(page, ["label:has-text('定时')", "text=定时发表"], 5_000);
     if (!schedule) throw new Error("当前视频号页面没有可用的定时发布入口");
     await schedule.click();
+    const scheduleInput = await visibleLocator(page, ["input[placeholder*='日期和时间']", "input[placeholder*='发布时间']", "input[type='datetime-local']"], 5_000);
+    if (!scheduleInput) throw new Error("视频号定时控件无法核验，请清除定时改为人工确认发布");
+    await fillText(scheduleInput, payload.scheduleAt.replace("T", " ").slice(0, 16));
   }
   const submitLabel = payload.mode === "draft" ? "保存草稿" : "发表";
   const submit = await visibleLocator(page, [`button:text-is('${submitLabel}')`, `button:has-text('${submitLabel}')`], 180_000);
   if (!submit || await submit.isDisabled().catch(() => true)) throw new Error(`视频号“${submitLabel}”按钮尚不可用，请检查视频处理和必填项`);
-  await submit.click();
+  if (payload.mode !== "manual") await submit.click();
   return submitLabel;
 }
 
@@ -316,22 +320,42 @@ export async function publishSocialVideo(platformAccountRoot, appRoot, platform,
     throw Object.assign(new Error("审核快照中的视频文件不存在"), { status: 409 });
   }
   const key = sessionKey(platform, accountId);
+  if (metricAccounts.has(key)) throw Object.assign(new Error("该账号正在采集数据，请稍后发布"), { status: 409 });
   const active = sessions.get(key);
   if (active) { await active.close().catch(() => undefined); sessions.delete(key); }
   const context = await launchContext(platformAccountRoot, appRoot, platform, accountId, false);
   let submitted = false;
+  let handedOff = false;
   try {
     const identity = await loginState(context, platform);
     if (!identity.authenticated) throw Object.assign(new Error(`${definition.label}登录已失效，请先重新登录`), { status: 409 });
     if (payload.expectedIdentityKey && identity.identityKey !== payload.expectedIdentityKey)
       throw Object.assign(new Error(`${definition.label}当前登录身份与任务绑定账号不一致，已阻止发布`), { status: 409 });
     const page = context.pages()[0] || await context.newPage();
+    const manageUrl = platform === "douyin" ? "https://creator.douyin.com/creator-micro/content/manage" : "https://channels.weixin.qq.com/platform/post/list";
+    await page.goto(manageUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await page.waitForTimeout(2500);
+    const duplicate = await page.evaluate((title) => {
+      const root = document.querySelector("wujie-app")?.shadowRoot || document;
+      return [...root.querySelectorAll("[class*='video-card-info'],.post-feed-item")].some((node) => {
+        const heading = node.querySelector("[class*='title']");
+        return heading?.textContent?.trim() === title;
+      });
+    }, String(payload.title || "").trim());
+    if (duplicate) throw Object.assign(new Error("平台后台已有同名作品，已阻止重复上传；请先在平台核对并关联作品链接"), { status: 409 });
     await page.goto(definition.publishUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
     const submitLabel = imagePost
       ? await uploadDouyinImages(page, payload)
       : platform === "douyin"
         ? await uploadDouyin(page, payload)
         : await uploadWechatChannels(page, payload);
+    if (payload.mode === "manual") {
+      handedOff = true;
+      sessions.set(key, context);
+      context.on("close", () => { if (sessions.get(key) === context) sessions.delete(key); });
+      await page.bringToFront();
+      return { status: "awaiting_user", detail: "审核内容已填写，请在浏览器中最终确认发布；完成后在平台内容档案中关联作品链接并确认结果", url: "", identityKey: identity.identityKey };
+    }
     submitted = true;
     const successText = platform === "douyin"
       ? ["发布成功", "作品已发布", "已存入草稿"]
@@ -356,7 +380,24 @@ export async function publishSocialVideo(platformAccountRoot, appRoot, platform,
       throw Object.assign(new Error(`${definition.label}提交已触发，但结果无法确认：${error instanceof Error ? error.message : "未知异常"}`), { uncertain: true });
     throw error;
   } finally {
-    await context.close().catch(() => undefined);
+    if (!handedOff) await context.close().catch(() => undefined);
+  }
+}
+
+export async function withSocialMetricPage(root, appRoot, platform, accountId, expectedIdentity, callback) {
+  const key = sessionKey(platform, validAccountId(accountId));
+  if (sessions.has(key) || metricAccounts.has(key)) throw new Error("该账号浏览器正在登录或使用中，采集已延后");
+  metricAccounts.add(key);
+  let browser;
+  try {
+    browser = await launchContext(root, appRoot, platform, accountId, true);
+    const identity = await loginState(browser, platform);
+    if (!identity.authenticated) throw new Error("账号登录已失效，请在账号管理中重新登录");
+    if (!expectedIdentity || identity.identityKey !== expectedIdentity) throw new Error("采集账号身份与绑定记录不一致，请重新核验账号");
+    return await callback(browser.pages()[0] || await browser.newPage());
+  } finally {
+    if (browser) await browser.close().catch(() => undefined);
+    metricAccounts.delete(key);
   }
 }
 

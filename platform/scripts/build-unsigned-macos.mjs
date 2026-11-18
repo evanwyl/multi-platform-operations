@@ -228,6 +228,7 @@ makeCopiedSymlinksPortable(packagedChromium, chromiumBundle);
 mkdirSync(resolve(packagedApp, "scripts"), { recursive: true });
 for (const script of [
   "app-service.mjs",
+  "operations-scheduler.mjs",
   "backup-local.mjs",
   "restore-local.mjs",
 ]) {

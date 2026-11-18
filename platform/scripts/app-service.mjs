@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { startOperationsScheduler } from "./operations-scheduler.mjs";
 
 const appRoot = resolve(process.env.HONGSHUTAI_APP_ROOT || resolve(import.meta.dirname, ".."));
 const dataRoot = resolve(process.env.HONGSHUTAI_DATA_ROOT || appRoot);
@@ -70,9 +71,11 @@ const children = [
 ];
 
 let closing = false;
+const stopOperations = startOperationsScheduler(token, teamAccessToken);
 function shutdown(code = 0) {
   if (closing) return;
   closing = true;
+  stopOperations();
   for (const child of children) if (child.exitCode === null) child.kill("SIGTERM");
   const deadline = setTimeout(() => {
     for (const child of children) if (child.exitCode === null) child.kill("SIGKILL");

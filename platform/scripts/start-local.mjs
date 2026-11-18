@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { startOperationsScheduler } from "./operations-scheduler.mjs";
 
 const workerConfig = "dist/server/wrangler.json";
 if (!existsSync(workerConfig)) {
@@ -52,9 +53,11 @@ const children = [
 ];
 
 let closing = false;
+const stopOperations = startOperationsScheduler(localEnv.RUNTIME_MANAGER_TOKEN, teamAccessToken);
 function shutdown(code = 0) {
   if (closing) return;
   closing = true;
+  stopOperations();
   for (const child of children) if (child.exitCode === null) child.kill("SIGTERM");
   setTimeout(() => process.exit(code), 4000).unref();
 }

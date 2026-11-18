@@ -2,23 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-
-test("renders the local operations platform shell", async () => {
-  const { default: worker } = await import(workerUrl.href);
-  const response = await worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html" } }),
-    {
-      ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
-    },
-    { waitUntil() {}, passThroughOnException() {} },
-  );
-  assert.equal(response.status, 200);
-  const html = await response.text();
-  assert.match(html, /<title>多平台内容运营<\/title>/);
-  assert.match(html, /正在启动多平台内容运营/);
-  assert.doesNotMatch(html, /codex-preview/);
-});
+// HTTP rendering is verified in operations-api.test.mjs under an actual isolated
+// workerd runtime. Recent Vinext output imports cloudflare:workers and cannot be
+// faithfully executed with Node's default module loader.
 
 test("opens an explicit account menu before signing out and shows AI wait progress", async () => {
   const source = await readFile(

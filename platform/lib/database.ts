@@ -14,6 +14,37 @@ export function database(): D1Database {
 }
 
 const schemaStatements = [
+  `CREATE TABLE IF NOT EXISTS metric_jobs (
+    id TEXT PRIMARY KEY, account_id TEXT NOT NULL, claim_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending', requested_by TEXT NOT NULL,
+    error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_metric_jobs_account ON metric_jobs(account_id,status,created_at)`,
+  `CREATE TABLE IF NOT EXISTS content_metrics (
+    id TEXT PRIMARY KEY, claim_id TEXT NOT NULL, account_id TEXT NOT NULL,
+    views INTEGER, likes INTEGER, comments INTEGER, favorites INTEGER, shares INTEGER,
+    source TEXT NOT NULL, collected_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_content_metrics_claim ON content_metrics(claim_id,collected_at)`,
+  `CREATE TABLE IF NOT EXISTS account_metrics (
+    id TEXT PRIMARY KEY, account_id TEXT NOT NULL, followers INTEGER NOT NULL,
+    source TEXT NOT NULL, collected_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_account_metrics_account ON account_metrics(account_id,collected_at)`,
+  `CREATE TABLE IF NOT EXISTS operations_settings (
+    id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS operations_events (
+    id TEXT PRIMARY KEY, action TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL, completed_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS publication_plans (
+    id TEXT PRIMARY KEY, claim_id TEXT NOT NULL, account_id TEXT NOT NULL,
+    requested_by TEXT NOT NULL, execute_at TEXT NOT NULL, snapshot TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending', error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_plan_active ON publication_plans(claim_id) WHERE status IN ('pending','running')`,
   `CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL, roles TEXT NOT NULL DEFAULT '["operator"]',
@@ -191,6 +222,8 @@ async function initializeDatabase() {
       .first(),
   );
   for (const statement of schemaStatements) await db.prepare(statement).run();
+  await db.prepare("INSERT OR IGNORE INTO operations_settings(id,enabled,updated_at) VALUES ('default',1,?)")
+    .bind(new Date().toISOString()).run();
   if (!accessTableExisted)
     await db
       .prepare(
@@ -570,4 +603,8 @@ export async function audit(
       new Date().toISOString(),
     )
     .run();
+  if (/提交审核|通过.*审核|退回|发布|草稿箱/.test(action)) {
+    await database().prepare("INSERT INTO operations_events(id,action,detail,created_at) VALUES (?,?,?,?)")
+      .bind(crypto.randomUUID(), action.slice(0, 100), detail.slice(0, 1000), new Date().toISOString()).run();
+  }
 }

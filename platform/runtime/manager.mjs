@@ -50,6 +50,8 @@ import {
   openWechatArticleReader,
 } from "./platforms/wechat-article-browser.mjs";
 import { imaSettings, saveImaSettings, syncImaRecord, testImaSettings } from "./platforms/ima-openapi.mjs";
+import { collectOperationsMetrics } from "./platforms/operations-browser.mjs";
+import { notificationStatus, saveNotifications, notifyOperations } from "./platforms/operations-notifications.mjs";
 
 const HOST = "127.0.0.1";
 const MANAGER_PORT = Number(process.env.MANAGER_PORT || 18100);
@@ -1008,6 +1010,18 @@ const server = createServer(async (request, response) => {
           lastUsed: slot.lastUsed,
         })),
       });
+    }
+    if (request.method === "GET" && url.pathname === "/operations/notifications") {
+      return json(response, 200, notificationStatus(configRoot));
+    }
+    if (request.method === "POST" && url.pathname === "/operations/notifications") {
+      return json(response, 200, saveNotifications(configRoot, await body(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/operations/notify") {
+      return json(response, 200, await notifyOperations(configRoot, await body(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/operations/collect") {
+      return json(response, 200, await collectOperationsMetrics(platformAccountRoot, appRoot, root, await body(request)));
     }
     if (request.method === "GET" && url.pathname === "/social/auth-status") {
       const platform = url.searchParams.get("platform") || "";

@@ -26,6 +26,7 @@ const statusLabels: Record<string, string> = {
   publishing: "发布中",
   drafted: "已入公众号草稿箱",
   scheduled: "已定时",
+  awaiting_user: "等待人工确认发布",
   published: "已发布",
   failed: "发布失败",
 };

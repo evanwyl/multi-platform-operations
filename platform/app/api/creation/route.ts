@@ -30,7 +30,7 @@ type CreativeDraft = {
   tags: string[];
   image_prompts: ImagePrompt[];
   creative_note: string;
-  video_options?: { mode: "publish" | "draft" };
+  video_options?: { mode: "publish" | "draft" | "manual"; schedule_at?: string };
   remix_mode?: RemixMode;
   remix_analysis?: RemixAnalysis | null;
 };
@@ -203,7 +203,10 @@ function normalizeCreative(
               (draft.video_options as { mode?: string } | undefined)?.mode ===
               "draft"
                 ? ("draft" as const)
-                : ("publish" as const),
+                : (draft.video_options as { mode?: string } | undefined)?.mode === "manual"
+                  ? ("manual" as const)
+                  : ("publish" as const),
+            schedule_at: String((draft.video_options as { schedule_at?: string } | undefined)?.schedule_at || "").slice(0, 40),
           },
         }
       : {}),
